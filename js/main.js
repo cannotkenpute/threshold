@@ -159,6 +159,8 @@ class GameEngine {
       this.player.toggleFlashlight();
     } else if (action === 'interact') {
       this.handlePlayerInteract();
+    } else if (action === 'use_item') {
+      this.inventory.useSlot(this.inventory.activeSlotIndex, this.player);
     } else if (action.startsWith('slot_')) {
       const slotIdx = parseInt(action.replace('slot_', '')) - 1;
       this.inventory.selectSlot(slotIdx, this.player);

@@ -57,6 +57,15 @@ export class InputManager {
     document.addEventListener('keyup', (e) => {
       this.handleKeyEvent(e, false);
     });
+
+    // Right-click (secondary button) uses/consumes the item in the active inventory slot
+    document.addEventListener('contextmenu', (e) => {
+      // Suppress the default browser context menu during pointer lock
+      e.preventDefault();
+      if (this.isLocked && this.onInteractKey) {
+        this.onInteractKey('use_item');
+      }
+    });
   }
 
   requestLock() {
