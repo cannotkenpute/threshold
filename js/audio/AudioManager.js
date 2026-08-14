@@ -271,11 +271,6 @@ export class AudioManager {
     }
   }
 
-  notifyPlayerStopped() {
-    this.isPlayerMoving = false;
-    this.playerStoppedTime = performance.now();
-  }
-
   triggerRandomAmbientSound() {
     const chance = Math.random();
     if (chance < 0.5) {
