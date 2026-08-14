@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Two Raccoons in a Trench Coat: High-Stakes Blackjack</title>
+  <meta name="description" content="Deal high-stakes Blackjack at the Emerald Velvet Casino as two raccoons in a trench coat! Don't let the humans notice your disguise!">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Fredoka:wght@400;600;700&family=Nunito:wght@400;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="game-container">
+    <!-- Main Game Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Top Casino Status HUD -->
+    <header id="casino-hud">
+      <div class="hud-group">
+        <div class="hud-pill chips-pill" title="Stolen Shiny Casino Chips">
+          <span class="hud-icon">🪙</span>
+          <span class="hud-value" id="chips-display">$150</span>
+        </div>
+        <div class="hud-pill shift-pill" title="Current Table & Shift Hand">
+          <span class="hud-icon">🎰</span>
+          <span class="hud-value" id="shift-display">Table 1 • Hand #1</span>
+        </div>
+      </div>
+
+      <!-- Human Suspicion & Disguise Integrity Meter -->
+      <div class="suspicion-container" id="suspicion-container" title="Human Suspicion Meter - Keep below 100%!">
+        <div class="suspicion-header">
+          <span class="suspicion-label">🕵️ Human Suspicion</span>
+          <span class="suspicion-pct" id="suspicion-pct">0%</span>
+        </div>
+        <div class="suspicion-bar-bg">
+          <div class="suspicion-bar-fill" id="suspicion-bar-fill"></div>
+        </div>
+      </div>
+
+      <div class="hud-group">
+        <button id="btn-sound" class="icon-btn" title="Toggle Sound FX (M)" aria-label="Toggle Sound">
+          <span id="sound-icon">🔊</span>
+        </button>
+        <button id="btn-music" class="icon-btn" title="Toggle Jazz Lounge Music (N)" aria-label="Toggle Music">
+          <span id="music-icon">🎷</span>
+        </button>
+        <button id="btn-disguise-shop" class="btn btn-gold" title="Disguise & Cheat Upgrades (B)">
+          🎩 Disguise Shop
+        </button>
+        <button id="btn-pause" class="icon-btn" title="Pause Game (ESC / P)" aria-label="Pause Game">
+          <span>⏸️</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Quick Emergency Disguise Actions Floating Bar -->
+    <div id="emergency-bar" class="emergency-bar">
+      <button id="btn-fix-mustache" class="disguise-action-btn" title="Fix Falling Fake Mustache (M key)">
+        <span class="action-emoji">🥸</span>
+        <span class="action-label">Pat Mustache [M]</span>
+        <div class="action-alert hidden" id="alert-mustache">!</div>
+      </button>
+
+      <button id="btn-tuck-tail" class="disguise-action-btn" title="Tuck Wagging Raccoon Tail (T key)">
+        <span class="action-emoji">🦝</span>
+        <span class="action-label">Tuck Tail [T]</span>
+        <div class="action-alert hidden" id="alert-tail">!</div>
+      </button>
+
+      <button id="btn-balance-coat" class="disguise-action-btn" title="Balance Wobbling Trench Coat (Left/Right or A/D)">
+        <span class="action-emoji">🧥</span>
+        <span class="action-label">Balance Coat [A/D]</span>
+        <div class="action-alert hidden" id="alert-balance">!</div>
+      </button>
+
+      <button id="btn-cheat-swap" class="disguise-action-btn cheat-btn" title="Sleight of Paw - Card Swap (C key)">
+        <span class="action-emoji">🃏</span>
+        <span class="action-label">Sleight of Paw [C]</span>
+        <span class="cheat-badge" id="cheat-badge">Ready</span>
+      </button>
+    </div>
+
+    <!-- Dealer Blackjack Table Controls Bar -->
+    <div id="table-controls" class="table-controls">
+      <div class="dealer-prompt" id="dealer-prompt">
+        <span class="prompt-speaker">🎩 Mr. Hugh Mann (You):</span>
+        <span class="prompt-text" id="prompt-text">"Care for a card, esteemed patron?"</span>
+      </div>
+
+      <div class="dealer-buttons-group">
+        <button id="btn-deal" class="btn btn-action btn-deal">
+          <span>🎴 DEAL HAND</span>
+        </button>
+        <button id="btn-hit" class="btn btn-action btn-hit hidden">
+          <span>➕ HIT CARD</span>
+        </button>
+        <button id="btn-stand" class="btn btn-action btn-stand hidden">
+          <span>✋ STAND</span>
+        </button>
+        <button id="btn-double" class="btn btn-action btn-double hidden">
+          <span>⚡ DOUBLE</span>
+        </button>
+        <button id="btn-pocket-chips" class="btn btn-gold btn-pocket">
+          <span>🤫 POCKET CHIPS (+$25)</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Notification Toasts -->
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+    <!-- Modals & Overlays -->
+    <!-- Start Screen -->
+    <div id="modal-title" class="modal-overlay active">
+      <div class="modal-card title-card">
+        <div class="casino-crest">🎰🦝🧥</div>
+        <h1 class="casino-title">Two Raccoons<br><span class="casino-gold-text">In a Trench Coat</span></h1>
+        <p class="casino-subtitle">High-Stakes Blackjack at the Emerald Velvet Casino</p>
+        
+        <div class="briefing-box">
+          <div class="raccoon-profile">
+            <span class="r-icon">🦝🎩</span>
+            <p><strong>Top Raccoon ("Reggie"):</strong> Deals cards, wears fake mustache & glasses, speaks in deep human accent.</p>
+          </div>
+          <div class="raccoon-profile">
+            <span class="r-icon">🦝👟</span>
+            <p><strong>Bottom Raccoon ("Barnaby Jr."):</strong> Operates trench coat legs, hides shiny chips, tucks wagging tail.</p>
+          </div>
+        </div>
+
+        <div class="rules-guide">
+          <div class="rule-item">
+            <span class="rule-icon">🃏</span>
+            <p><strong>Deal Authentic Blackjack:</strong> Pay 3:2 for Blackjack, beat players to 21.</p>
+          </div>
+          <div class="rule-item">
+            <span class="rule-icon">🕵️</span>
+            <p><strong>Watch Human Suspicion:</strong> If Inspector Higgins or Human Patrons notice your fur or tail, it's game over!</p>
+          </div>
+          <div class="rule-item">
+            <span class="rule-icon">✨</span>
+            <p><strong>Emergency QTEs:</strong> Fix mustache [M], tuck tail [T], and balance the coat [A/D]!</p>
+          </div>
+        </div>
+
+        <button id="btn-start-casino" class="btn btn-big btn-gold btn-start">
+          🎲 Take the Dealer Seat!
+        </button>
+      </div>
+    </div>
+
+    <!-- Disguise & Cheats Shop Modal -->
+    <div id="modal-disguise-shop" class="modal-overlay hidden">
+      <div class="modal-card shop-card">
+        <div class="modal-header">
+          <h2>🎩 Master Disguise & Casino Gear</h2>
+          <button class="close-btn" id="btn-close-shop" aria-label="Close Shop">&times;</button>
+        </div>
+        <div class="shop-balance-bar">
+          <span>Stashed Chip Earnings: <strong id="shop-chips-display">$150</strong></span>
+          <span>Dealer Reputation: <strong id="shop-rep-display">Smooth Operator ⭐</strong></span>
+        </div>
+
+        <div class="shop-items-grid" id="disguise-shop-grid">
+          <!-- Dynamically populated via JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Busted / Game Over Modal -->
+    <div id="modal-busted" class="modal-overlay hidden">
+      <div class="modal-card busted-card">
+        <div class="busted-badge">🚨 DISGUISE BLOWN! 🚨</div>
+        <h2>"Wait... You're Just Two Raccoons!"</h2>
+        <p id="busted-reason">Inspector Higgins pulled on your trench coat and discovered Barnaby Jr. eating a breadstick!</p>
+
+        <div class="busted-stats">
+          <div class="stat-row">
+            <span>🎴 Hands Dealt</span>
+            <strong id="busted-hands">0</strong>
+          </div>
+          <div class="stat-row">
+            <span>🪙 Chips Stashed in Coat</span>
+            <strong id="busted-chips">$0</strong>
+          </div>
+          <div class="stat-row">
+            <span>🦊 Animal Allies Cheered</span>
+            <strong id="busted-allies">0</strong>
+          </div>
+        </div>
+
+        <button id="btn-try-again" class="btn btn-big btn-gold">
+          🔄 Put Coat Back On & Try Again!
+        </button>
+      </div>
+    </div>
+
+    <!-- Shift Completed Modal -->
+    <div id="modal-shift-complete" class="modal-overlay hidden">
+      <div class="modal-card summary-card">
+        <div class="summary-badge">🥂 Shift Succeeded!</div>
+        <h2>High Roller VIP Payout</h2>
+        <p>The Pit Boss was fooled completely! You pocketed a mountain of shiny casino chips.</p>
+
+        <div class="busted-stats">
+          <div class="stat-row">
+            <span>💰 Shift Profits</span>
+            <strong id="shift-profit">+$250</strong>
+          </div>
+          <div class="stat-row">
+            <span>🕵️ Average Human Suspicion</span>
+            <strong id="shift-suspicion">18% (Clean!)</strong>
+          </div>
+        </div>
+
+        <button id="btn-next-shift" class="btn btn-big btn-gold">
+          🎰 Move to VIP High-Stakes Table!
+        </button>
+      </div>
+    </div>
+
+    <!-- Pause Menu Modal -->
+    <div id="modal-pause" class="modal-overlay hidden">
+      <div class="modal-card pause-card">
+        <h2>⏸️ Table Paused</h2>
+        <div class="pause-menu-buttons">
+          <button id="btn-resume" class="btn btn-big btn-gold">▶️ Resume Hand</button>
+          <button id="btn-reset-save" class="btn btn-danger">🗑️ Reset Save & Stash</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/audio.js"></script>
+  <script src="js/sprites.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

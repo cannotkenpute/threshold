@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Trash Panda Wash & Dry — Raccoon Laundromat</title>
+  <meta name="description" content="Run a cozy critter laundromat as Barnaby the Raccoon! Wash, dry, fold, customize your layout, and find shiny treasures in pockets.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Nunito:wght@400;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="game-container">
+    <!-- Main Game Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Top HUD Overlay -->
+    <header id="top-hud">
+      <div class="hud-group">
+        <div class="hud-pill money-pill" id="hud-money" title="Your Coins">
+          <span class="hud-icon">🪙</span>
+          <span class="hud-value" id="money-display">50</span>
+        </div>
+        <div class="hud-pill star-pill" id="hud-reputation" title="Reputation & Level">
+          <span class="hud-icon">⭐</span>
+          <span class="hud-value" id="rep-display">Lvl 1 (0★)</span>
+        </div>
+        <div class="hud-pill day-pill" id="hud-day" title="Current Day & Time">
+          <span class="hud-icon">☀️</span>
+          <span class="hud-value" id="time-display">Day 1 • 09:00 AM</span>
+        </div>
+        <div class="hud-pill carry-pill hidden" id="hud-carrying" title="Item in Paws">
+          <span class="hud-icon" id="carry-icon">🧺</span>
+          <span class="hud-value" id="carry-label">Basket</span>
+          <button id="btn-drop-item" class="btn-drop-pill" title="Drop / Set Down Item (Q)">❌ Drop [Q]</button>
+        </div>
+      </div>
+
+      <div class="hud-group">
+        <button id="btn-sound" class="icon-btn" title="Toggle Sound (M)" aria-label="Toggle Sound">
+          <span id="sound-icon">🔊</span>
+        </button>
+        <button id="btn-music" class="icon-btn" title="Toggle Music (N)" aria-label="Toggle Music">
+          <span id="music-icon">🎵</span>
+        </button>
+        <button id="btn-layout" class="btn btn-primary" title="Customize Laundromat Layout (L)">
+          🏗️ Remodel
+        </button>
+        <button id="btn-staff" class="btn btn-primary" title="Hire & Manage AI Staff (H)">
+          👥 Staff <span id="staff-count-badge" class="badge">0/1</span>
+        </button>
+        <button id="btn-shop" class="btn btn-primary" title="Open Upgrades & Shop (B)">
+          🛒 Upgrades
+        </button>
+        <button id="btn-trinkets" class="btn btn-secondary" title="Lost & Found Scrapbook (T)">
+          ✨ Scrapbook <span id="trinket-count-badge" class="badge">0/12</span>
+        </button>
+        <button id="btn-pause" class="icon-btn" title="Pause Game (ESC / P)" aria-label="Pause Game">
+          <span>⏸️</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Floating Quick Prompts / Tooltips -->
+    <div id="interaction-prompt" class="interaction-prompt hidden">
+      <span class="key-badge">SPACE</span>
+      <span class="prompt-text">Interact</span>
+    </div>
+
+    <!-- Layout Editor Floating Bar (Active in remodel mode) -->
+    <div id="layout-editor-bar" class="layout-editor-bar hidden">
+      <div class="editor-header">
+        <span class="editor-title">🏗️ Laundromat Remodel Mode</span>
+        <span class="editor-subtitle">Click and drag any machine or furniture to rearrange!</span>
+      </div>
+
+      <div class="editor-controls">
+        <button id="btn-grid-snap" class="btn btn-secondary active-toggle" title="Toggle Grid Snapping">
+          🧲 Snap: <strong id="snap-label">ON</strong>
+        </button>
+        <button id="btn-place-machines" class="btn btn-secondary" title="Place or relocate owned washers, dryers & stations">
+          📦 Place Machines
+        </button>
+        <button id="btn-add-decor" class="btn btn-secondary" title="Add Decorative Plants, Rugs & Furniture">
+          ➕ Add Decor
+        </button>
+        <button id="btn-layout-presets" class="btn btn-secondary" title="Choose Preset Layout">
+          🎨 Presets
+        </button>
+        <button id="btn-delete-selected" class="btn btn-danger hidden" title="Remove Selected Decor Item">
+          🗑️ Remove
+        </button>
+        <button id="btn-reset-layout" class="btn btn-secondary" title="Reset to Default Layout">
+          🔄 Reset Default
+        </button>
+        <button id="btn-save-layout" class="btn btn-primary btn-save-editor" title="Save Layout and Resume Play">
+          💾 Save & Play
+        </button>
+      </div>
+    </div>
+
+    <!-- Mobile Virtual Controls (auto-shown on touch devices) -->
+    <div id="mobile-controls" class="mobile-controls hidden">
+      <div id="joystick-zone" class="joystick-zone">
+        <div id="joystick-knob" class="joystick-knob"></div>
+      </div>
+      <div class="action-buttons-zone">
+        <button id="mobile-action-btn" class="mobile-btn action-main" aria-label="Action / Interact">
+          <span>🐾 WASH</span>
+        </button>
+        <button id="mobile-sprint-btn" class="mobile-btn action-sprint" aria-label="Sprint">
+          <span>⚡ ZOOM</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Notification Toasts -->
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+    <!-- Modals & Overlays -->
+    <!-- Start / Title Screen -->
+    <div id="modal-title" class="modal-overlay active">
+      <div class="modal-card title-card">
+        <div class="title-raccoon-badge">🦝🧼</div>
+        <h1 class="game-title">Trash Panda<br><span class="title-sub">Wash & Dry</span></h1>
+        <p class="game-tagline">Barnaby the Raccoon is ready to turn his humble alley into the sparkling-est laundromat in Critter City!</p>
+        
+        <div class="title-guide">
+          <div class="guide-item">
+            <span class="g-icon">🧺</span>
+            <p><strong>Take Laundry</strong> from lovely animal customers</p>
+          </div>
+          <div class="guide-item">
+            <span class="g-icon">🫧</span>
+            <p><strong>Wash & Dry</strong> in machines with bubbly soap</p>
+          </div>
+          <div class="guide-item">
+            <span class="g-icon">👕</span>
+            <p><strong>Fold & Deliver</strong> for fat tips & shiny pocket treasures!</p>
+          </div>
+        </div>
+
+        <div class="controls-hint">
+          <span><strong>Move:</strong> WASD / Arrow Keys or Click</span>
+          <span><strong>Interact:</strong> [SPACE] or [E]</span>
+          <span><strong>Drop/Swap:</strong> [Q]</span>
+          <span><strong>Remodel:</strong> [L]</span>
+          <span><strong>Zoomies:</strong> [SHIFT]</span>
+        </div>
+
+        <button id="btn-start-game" class="btn btn-big btn-start">
+          🐾 Start Laundromat Shift!
+        </button>
+      </div>
+    </div>
+
+    <!-- Upgrades / Shop Modal -->
+    <div id="modal-shop" class="modal-overlay hidden">
+      <div class="modal-card shop-card">
+        <div class="modal-header">
+          <h2>🛒 Laundromat Upgrades & Supplies</h2>
+          <button class="close-btn" id="btn-close-shop" aria-label="Close Shop">&times;</button>
+        </div>
+        <div class="shop-balance-bar">
+          <span>Available Funds: <strong id="shop-money-display">🪙 50</strong></span>
+          <span>Reputation: <strong id="shop-rep-display">⭐ Level 1</strong></span>
+        </div>
+
+        <!-- Shop Tabs -->
+        <div class="shop-tabs">
+          <button class="shop-tab active" data-tab="machines">Machines & Stations</button>
+          <button class="shop-tab" data-tab="helpers">Bandit Crew & Perks</button>
+          <button class="shop-tab" data-tab="amenities">Lounge & Decor</button>
+          <button class="shop-tab" data-tab="soaps">Soaps & Detergents</button>
+        </div>
+
+        <!-- Shop Items Container -->
+        <div class="shop-items-grid" id="shop-items-container">
+          <!-- Dynamically populated via JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Staff Hiring & Management Modal -->
+    <div id="modal-staff" class="modal-overlay hidden">
+      <div class="modal-card staff-card">
+        <div class="modal-header">
+          <h2>👥 Critter Employment Agency</h2>
+          <button class="close-btn" id="btn-close-staff" aria-label="Close Staff Agency">&times;</button>
+        </div>
+        <p class="scrapbook-desc">Hire an animal assistant to automate laundry tasks! Hourly wage: <strong>🪙12 / hour</strong> during daytime shifts.</p>
+
+        <!-- Current Active Employee Section -->
+        <div id="current-employee-section" class="current-employee-section">
+          <!-- Dynamically populated by JS (Shows active employee + FIRE button, or No active staff) -->
+        </div>
+
+        <!-- Available Candidates Roster -->
+        <h3 class="section-subtitle">📋 Available Animal Candidates</h3>
+        <div class="staff-candidates-grid" id="staff-candidates-grid">
+          <!-- Dynamically populated via JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Place & Rescue Machines Modal -->
+    <div id="modal-place-machines" class="modal-overlay hidden">
+      <div class="modal-card place-machines-card">
+        <div class="modal-header">
+          <h2>📦 Place & Relocate Owned Equipment</h2>
+          <button class="close-btn" id="btn-close-place-machines" aria-label="Close Equipment Manager">&times;</button>
+        </div>
+        <p class="scrapbook-desc">If any washer, dryer, or station is missing, misplaced, or obscured, click below to place it in-bounds or auto-align your whole shop!</p>
+        
+        <div class="place-machines-actions">
+          <button id="btn-auto-align-machines" class="btn btn-primary">
+            ✨ Auto-Align All Owned Machines
+          </button>
+          <button id="btn-bring-all-to-center" class="btn btn-secondary">
+            📍 Bring All Items In-Bounds
+          </button>
+        </div>
+
+        <h3 class="section-subtitle">📋 Your Unlocked Equipment</h3>
+        <div class="owned-machines-grid" id="owned-machines-grid">
+          <!-- Dynamically populated via JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Layout Presets Modal -->
+    <div id="modal-presets" class="modal-overlay hidden">
+      <div class="modal-card presets-card">
+        <div class="modal-header">
+          <h2>🎨 Laundromat Layout Presets</h2>
+          <button class="close-btn" id="btn-close-presets" aria-label="Close Presets">&times;</button>
+        </div>
+        <p class="scrapbook-desc">Select a preset layout or customize your own machine placements!</p>
+        
+        <div class="presets-grid">
+          <div class="preset-card" data-preset="classic">
+            <div class="preset-icon">🏛️</div>
+            <div class="preset-info">
+              <h3>Classic Wall Lineup</h3>
+              <p>Washers on left wall, Dryers on right wall, Center folding table.</p>
+            </div>
+            <button class="btn btn-primary btn-sm btn-apply-preset" data-preset="classic">Apply</button>
+          </div>
+
+          <div class="preset-card" data-preset="island">
+            <div class="preset-icon">🏝️</div>
+            <div class="preset-info">
+              <h3>Central Island Hub</h3>
+              <p>Washers & Dryers back-to-back in an island with perimeter lounge.</p>
+            </div>
+            <button class="btn btn-primary btn-sm btn-apply-preset" data-preset="island">Apply</button>
+          </div>
+
+          <div class="preset-card" data-preset="speedrun">
+            <div class="preset-icon">⚡</div>
+            <div class="preset-info">
+              <h3>Speedrun Express</h3>
+              <p>Compact triangle: Counter ➔ Washers ➔ Dryers ➔ Table for rapid shifts!</p>
+            </div>
+            <button class="btn btn-primary btn-sm btn-apply-preset" data-preset="speedrun">Apply</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Decor Catalog Modal -->
+    <div id="modal-decor" class="modal-overlay hidden">
+      <div class="modal-card decor-card">
+        <div class="modal-header">
+          <h2>🌿 Add Decorative Furniture & Plants</h2>
+          <button class="close-btn" id="btn-close-decor" aria-label="Close Decor">&times;</button>
+        </div>
+        <p class="scrapbook-desc">Select any item to place into your laundromat layout!</p>
+        
+        <div class="decor-items-grid">
+          <button class="decor-item-btn" data-decor="monstera">
+            <span class="decor-icon">🪴</span>
+            <span class="decor-name">Monstera Pot</span>
+          </button>
+          <button class="decor-item-btn" data-decor="cactus">
+            <span class="decor-icon">🌵</span>
+            <span class="decor-name">Potted Cactus</span>
+          </button>
+          <button class="decor-item-btn" data-decor="coffee">
+            <span class="decor-icon">☕</span>
+            <span class="decor-name">Coffee Machine</span>
+          </button>
+          <button class="decor-item-btn" data-decor="bubble_lamp">
+            <span class="decor-icon">💡</span>
+            <span class="decor-name">Bubble Lamp</span>
+          </button>
+          <button class="decor-item-btn" data-decor="rug_coral">
+            <span class="decor-icon">🧶</span>
+            <span class="decor-name">Cozy Coral Rug</span>
+          </button>
+          <button class="decor-item-btn" data-decor="rug_teal">
+            <span class="decor-icon">🟦</span>
+            <span class="decor-name">Mint Teal Rug</span>
+          </button>
+          <button class="decor-item-btn" data-decor="bench">
+            <span class="decor-icon">🛋️</span>
+            <span class="decor-name">Waiting Bench</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lost & Found Scrapbook Modal -->
+    <div id="modal-trinkets" class="modal-overlay hidden">
+      <div class="modal-card trinkets-card">
+        <div class="modal-header">
+          <h2>✨ Barnaby's Lost & Found Scrapbook</h2>
+          <button class="close-btn" id="btn-close-trinkets" aria-label="Close Scrapbook">&times;</button>
+        </div>
+        <p class="scrapbook-desc">Shiny trinkets, lost treasures, and quirky junk found inside customer pockets while sorting laundry!</p>
+        
+        <div class="trinkets-grid" id="trinkets-grid">
+          <!-- Dynamically populated via JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Day End Summary Modal -->
+    <div id="modal-summary" class="modal-overlay hidden">
+      <div class="modal-card summary-card">
+        <div class="summary-header">
+          <span class="summary-badge">🌙 Shift Complete!</span>
+          <h2 id="summary-day-title">Day 1 Report</h2>
+        </div>
+
+        <div class="summary-stats-list">
+          <div class="stat-row">
+            <span>🧺 Loads Washed & Folded</span>
+            <strong id="stat-loads">0</strong>
+          </div>
+          <div class="stat-row">
+            <span>😊 Happy Customers Served</span>
+            <strong id="stat-customers">0</strong>
+          </div>
+          <div class="stat-row">
+            <span>🪙 Laundry Revenue</span>
+            <strong id="stat-revenue">+🪙 0</strong>
+          </div>
+          <div class="stat-row">
+            <span>💖 Generous Tips</span>
+            <strong id="stat-tips">+🪙 0</strong>
+          </div>
+          <div class="stat-row">
+            <span>✨ New Pocket Treasures</span>
+            <strong id="stat-trinkets">0</strong>
+          </div>
+          <div class="stat-row total-row">
+            <span>Total Day Profit</span>
+            <strong id="stat-total-profit">🪙 0</strong>
+          </div>
+        </div>
+
+        <button id="btn-next-day" class="btn btn-big btn-primary">
+          ☀️ Start Next Morning!
+        </button>
+      </div>
+    </div>
+
+    <!-- Pause Menu Modal -->
+    <div id="modal-pause" class="modal-overlay hidden">
+      <div class="modal-card pause-card">
+        <h2>⏸️ Game Paused</h2>
+        <div class="pause-menu-buttons">
+          <button id="btn-resume" class="btn btn-big btn-primary">▶️ Resume Shift</button>
+          <button id="btn-restart" class="btn btn-secondary">🔄 Restart Shift</button>
+          <button id="btn-reset-save" class="btn btn-danger">🗑️ Reset All Save Data</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/audio.js"></script>
+  <script src="js/sprites.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

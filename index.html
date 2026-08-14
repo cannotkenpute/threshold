@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>PROJECT NULL-VECTOR: LEVEL 1 (1984)</title>
+  <meta name="description" content="1980s Retro 3D First-Person Psychological Horror Game set in The Backrooms.">
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/crt.css">
+  <!-- Three.js (r128) & Loaders (FBX, Collada, OBJ, MTL) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.0/umd/index.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/ColladaLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+</head>
+<body>
+  <!-- 3D Canvas Viewport -->
+  <div id="canvas-container"></div>
+
+  <!-- CRT & VHS Post-Processing Overlay Layer -->
+  <div id="crt-overlay-layer">
+    <div class="crt-scanlines"></div>
+    <div class="crt-vignette"></div>
+    <div class="vhs-noise-bar"></div>
+    <div class="crt-flicker"></div>
+  </div>
+
+  <!-- HUD & User Interface (Hidden during Title Screen 3D Walking Pan) -->
+  <div id="ui-root" style="display: none;">
+    <!-- Center Reticle & Interaction -->
+    <div class="hud-layer">
+      <div id="crosshair"></div>
+      <div id="interact-prompt">[E] EXAMINE ITEM</div>
+    </div>
+
+    <!-- Top Left Objective Banner -->
+    <div class="objective-container">
+      <div class="objective-tag">DIRECTIVE // CLASSIFIED</div>
+      <div id="objective-text" class="objective-text">FOLLOW THE ROPE TETHER INTO THE ANOMALY</div>
+    </div>
+
+    <!-- Power Grid Day/Night Cycle Indicator -->
+    <div id="power-grid-hud" class="power-grid-container">
+      <span class="grid-label">GRID:</span>
+      <span id="grid-status-text" class="grid-status day">ACTIVE [DAY]</span>
+      <span id="grid-timer-text" class="grid-timer">06:00</span>
+    </div>
+
+    <!-- Top Right Mechanical Compass -->
+    <div class="compass-widget">
+      <div class="compass-dial">
+        <div id="compass-needle" class="compass-needle"></div>
+        <div class="compass-center-pin"></div>
+        <div class="compass-cardinal n">N</div>
+        <div class="compass-cardinal s">S</div>
+        <div class="compass-cardinal e">E</div>
+        <div class="compass-cardinal w">W</div>
+      </div>
+    </div>
+
+    <!-- Bottom Left Analog Vitals (Retro Battery Status & Stamina) -->
+    <div class="bottom-left-hud">
+      <div class="analog-meter-container retro-battery-container">
+        <div class="battery-icon-wrap">
+          <div class="battery-nub"></div>
+          <div class="battery-shell">
+            <div id="battery-segments" class="battery-segments">
+              <div class="seg seg-1"></div>
+              <div class="seg seg-2"></div>
+              <div class="seg seg-3"></div>
+              <div class="seg seg-4"></div>
+            </div>
+          </div>
+        </div>
+        <div class="battery-info">
+          <span class="meter-label">FLASHLIGHT</span>
+          <span id="battery-percent-text" class="battery-percent">100%</span>
+        </div>
+      </div>
+      <div class="analog-meter-container">
+        <span class="meter-label">EXERTION</span>
+        <div class="stamina-bar-container">
+          <div id="stamina-level-bar" class="stamina-level"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Right Field Equipment Quick Slots & Archive Hint -->
+    <div class="hud-archive-hint" style="position: absolute; bottom: 76px; right: 28px; font-size: 0.72rem; color: #88aa80; font-family: var(--ui-font-mono); letter-spacing: 1px; background: rgba(14, 18, 12, 0.85); border: 1px solid #2d3c26; padding: 4px 8px; border-radius: 2px;">[Q] AUDIO ARCHIVE</div>
+    <div class="quick-slots">
+      <div class="slot-box" data-slot="1"><span class="slot-key">1</span><span class="slot-icon"></span><span class="slot-count"></span></div>
+      <div class="slot-box" data-slot="2"><span class="slot-key">2</span><span class="slot-icon"></span><span class="slot-count"></span></div>
+      <div class="slot-box" data-slot="3"><span class="slot-key">3</span><span class="slot-icon"></span><span class="slot-count"></span></div>
+      <div class="slot-box" data-slot="4"><span class="slot-key">4</span><span class="slot-icon"></span><span class="slot-count"></span></div>
+      <div class="slot-box" data-slot="5"><span class="slot-key">5</span><span class="slot-icon"></span><span class="slot-count"></span></div>
+      <div class="slot-box" data-slot="6"><span class="slot-key">6</span><span class="slot-icon"></span><span class="slot-count"></span></div>
+    </div>
+
+    <!-- Big Retro Objective Splash Banner -->
+    <div id="hud-splash-banner" class="hud-splash-banner">
+      <div class="splash-tag">DIRECTIVE UPDATED</div>
+      <div id="splash-title" class="splash-title">NEW DIRECTIVE</div>
+      <div id="splash-sub" class="splash-sub">LOCATE THE EMERGENCY FUEL CANISTER IN THE GARAGE</div>
+    </div>
+
+    <!-- Subtitle Dialogue Overlay -->
+    <div id="subtitles"></div>
+  </div>
+
+  <!-- Classified Paper Dossier Modal -->
+  <div id="dossier-modal" class="modal-overlay">
+    <div class="dossier-paper">
+      <div class="dossier-stamp">TOP SECRET</div>
+      <div class="dossier-header">
+        <h2 id="dossier-title" class="dossier-title">EXPEDITION DOSSIER</h2>
+        <div id="dossier-sub" class="dossier-sub">DR. SAMUEL REED — NONLOCAL SPATIAL CORRELATIONS</div>
+      </div>
+      <div id="dossier-body" class="dossier-body">
+        Loading document contents...
+      </div>
+      <div class="dossier-close-hint">[PRESS ESCAPE TO CLOSE DOSSIER]</div>
+    </div>
+  </div>
+
+  <!-- 1980s Cassette Deck Player Modal -->
+  <div id="cassette-modal" class="modal-overlay">
+    <div class="tape-deck-container">
+      <div class="deck-header">
+        <div class="deck-branding">TASCAM-84 FIELD RECORDER</div>
+        <div class="deck-model">MICROCASSETTE 2-TRACK</div>
+      </div>
+
+      <!-- Cassette Compartment -->
+      <div class="tape-cassette-housing">
+        <div class="cassette-shell">
+          <div id="cassette-deck-label" class="cassette-label">EXPEDITION LOG 01 — MERCER</div>
+          <div class="cassette-window">
+            <div class="cassette-spool"></div>
+            <div class="cassette-spool"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dual VU Meters -->
+      <div class="vu-meter-rack">
+        <div class="vu-meter">
+          <div class="vu-scale">-20 -10 -5 0 +3 dB</div>
+          <div id="vu-needle-left" class="vu-needle"></div>
+        </div>
+        <div class="vu-meter">
+          <div class="vu-scale">-20 -10 -5 0 +3 dB</div>
+          <div id="vu-needle-right" class="vu-needle"></div>
+        </div>
+      </div>
+
+      <!-- Live Transcript -->
+      <div class="transcript-box">
+        <div id="cassette-transcript-text">[INSERT CASSETTE. PRESS PLAY]</div>
+      </div>
+
+      <!-- Mechanical Buttons -->
+      <div class="deck-controls">
+        <button id="btn-deck-play" class="deck-btn">▶ PLAY</button>
+        <button id="btn-deck-stop" class="deck-btn">◼ STOP</button>
+        <button id="btn-deck-eject" class="deck-btn">⏏ EJECT / CLOSE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1980s Audio Log Archive & Tape Player Modal [Q] -->
+  <div id="archive-modal" class="modal-overlay">
+    <div class="archive-deck-container">
+      <div class="archive-header">
+        <div class="archive-tag">EXPEDITION ARCHIVE // MAGNETIC TAPE DECK</div>
+        <h2 class="archive-title">AUDIO LOG REPOSITORY [Q]</h2>
+      </div>
+
+      <div class="archive-body">
+        <!-- Log List Sidebar -->
+        <div class="archive-sidebar">
+          <div class="archive-section-label">AVAILABLE RECORDINGS & TRANSMISSIONS:</div>
+          <div id="archive-log-list" class="archive-log-list">
+            <!-- Populated dynamically by ArchiveUI.js -->
+          </div>
+        </div>
+
+        <!-- Player Deck & Transcript View -->
+        <div class="archive-player-pane">
+          <div class="archive-deck-header">
+            <div id="archive-deck-label" class="archive-deck-title">00:00 — SUPERVISOR VAUGHN: GATEWAY DISPATCH</div>
+            <div id="archive-deck-speaker" class="archive-deck-speaker">Supervisor K. Vaughn [Expedition Supervisor]</div>
+          </div>
+
+          <!-- Animated Cassette Compartment -->
+          <div class="archive-cassette-housing">
+            <div class="archive-cassette-shell">
+              <div class="archive-cassette-window">
+                <div class="archive-spool"></div>
+                <div class="archive-spool"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Transcript Output -->
+          <div class="archive-transcript-box">
+            <div id="archive-transcript-text" class="archive-transcript-text">[SELECT A RECORDING FROM THE LEFT TO BEGIN PLAYBACK]</div>
+          </div>
+
+          <!-- Transport Controls -->
+          <div class="archive-controls">
+            <button id="btn-archive-play" class="deck-btn">▶ PLAY</button>
+            <button id="btn-archive-stop" class="deck-btn">◼ STOP</button>
+            <button id="btn-archive-close" class="deck-btn">⏏ CLOSE [Q / ESC]</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1980s Terminal Options / Pause Menu Modal -->
+  <div id="options-modal" class="modal-overlay">
+    <div class="options-container">
+      <div class="options-header">
+        <div class="options-tag">SYSTEM PARAMETERS // CALIBRATION</div>
+        <h2 class="options-title">SYSTEM SETTINGS</h2>
+      </div>
+
+      <div class="options-grid">
+        <!-- Audio Channels -->
+        <div class="option-group">
+          <label class="option-label" for="opt-master-vol">MASTER VOLUME</label>
+          <div class="slider-row">
+            <input type="range" id="opt-master-vol" min="0" max="100" value="100" class="retro-slider">
+            <span id="opt-master-vol-val" class="slider-val">100%</span>
+          </div>
+        </div>
+
+        <div class="option-group">
+          <label class="option-label" for="opt-voice-vol">VOICE & RADIO VOLUME</label>
+          <div class="slider-row">
+            <input type="range" id="opt-voice-vol" min="0" max="100" value="95" class="retro-slider">
+            <span id="opt-voice-vol-val" class="slider-val">95%</span>
+          </div>
+        </div>
+
+        <div class="option-group">
+          <label class="option-label" for="opt-sfx-vol">SFX & AMBIENCE VOLUME</label>
+          <div class="slider-row">
+            <input type="range" id="opt-sfx-vol" min="0" max="100" value="85" class="retro-slider">
+            <span id="opt-sfx-vol-val" class="slider-val">85%</span>
+          </div>
+        </div>
+
+        <!-- Controls / Sensitivity -->
+        <div class="option-group">
+          <label class="option-label" for="opt-mouse-sens">MOUSE LOOK SENSITIVITY</label>
+          <div class="slider-row">
+            <input type="range" id="opt-mouse-sens" min="10" max="100" value="45" class="retro-slider">
+            <span id="opt-mouse-sens-val" class="slider-val">45</span>
+          </div>
+        </div>
+
+        <!-- Video / CRT Filter Options -->
+        <div class="option-group">
+          <label class="option-label" for="opt-scanlines">CRT SCANLINE INTENSITY</label>
+          <div class="slider-row">
+            <input type="range" id="opt-scanlines" min="0" max="100" value="28" class="retro-slider">
+            <span id="opt-scanlines-val" class="slider-val">28%</span>
+          </div>
+        </div>
+
+        <div class="option-group">
+          <label class="option-label" for="opt-curvature">CRT SCREEN CURVATURE</label>
+          <div class="slider-row">
+            <input type="range" id="opt-curvature" min="0" max="100" value="8" class="retro-slider">
+            <span id="opt-curvature-val" class="slider-val">8%</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="options-actions">
+        <button id="btn-options-resume" class="menu-btn">RESUME MISSION [T / ESC]</button>
+      </div>
+
+      <!-- Developer / Debug Teleport Suite -->
+      <div class="dev-menu-section">
+        <div class="dev-menu-header">
+          <span class="dev-badge">[DEV]</span>
+          <span class="dev-title">DEVELOPER TELEPORT SUITE</span>
+        </div>
+        <div class="dev-teleport-grid">
+          <button class="dev-btn" data-warp="spawn">📍 LEVEL 1: LAB SPAWN</button>
+          <button class="dev-btn" data-warp="alpha">📼 LEVEL 1: MERCER LOG 01</button>
+          <button class="dev-btn" data-warp="flood">🌊 LEVEL 1: REED NOTEBOOK</button>
+          <button class="dev-btn" data-warp="cole">📼 LEVEL 1: COLE TAPE #2</button>
+          <button class="dev-btn" data-warp="obs">👁️ LEVEL 1: HELEN PARK LOG</button>
+          <button class="dev-btn" data-warp="steel">🚪 LEVEL 1: STEEL DOOR</button>
+          <button class="dev-btn" data-warp="mercer_final">📼 LEVEL 1: MERCER FINAL TAPE</button>
+          <button class="dev-btn dev-btn-exit" data-warp="exit">🚪 LEVEL 1: EXIT DOORWAY</button>
+          <button class="dev-btn dev-btn-lvl2" data-warp="lvl2_entrance">🚗 LEVEL 2: GARAGE ENTRANCE</button>
+          <button class="dev-btn dev-btn-gas" data-warp="lvl2_gas_can">⛽ LEVEL 2: GAS CAN CACHE</button>
+          <button class="dev-btn dev-btn-crowbar" data-warp="lvl2_crowbar">🔧 LEVEL 2: CROWBAR LOCATION</button>
+          <button class="dev-btn dev-btn-exit" data-warp="lvl2_escape_car">🚗 LEVEL 2: ESCAPE VEHICLE</button>
+          <button class="dev-btn dev-btn-lvl2" data-warp="lvl2_sedans">🚗 LEVEL 2: ABANDONED CARS ROW</button>
+          <button class="dev-btn dev-btn-lvl2" data-warp="lvl2_deep">🚗 LEVEL 2: DEEP GARAGE SECTOR</button>
+          <button class="dev-btn dev-btn-lvl3" data-warp="lvl3_highway">🛣️ LEVEL 3: THE DARK HIGHWAY</button>
+          <button class="dev-btn dev-btn-lvl3" data-warp="lvl3_police">🚨 LEVEL 3: ABANDONED PATROL CAR</button>
+        </div>
+      </div>
+
+      <div class="options-footer-hint">PRESS [T] OR [ESC] TO CLOSE SETTINGS & RETURN TO GAMEPLAY</div>
+    </div>
+  </div>
+
+  <!-- Title Screen -->
+  <div id="title-screen">
+    <div class="title-header">
+      <div class="title-dossier-tag">DEPARTMENT OF SPATIAL ANOMALY — CLASSIFIED 1984</div>
+      <h1 class="game-title">THE BACKROOMS</h1>
+      <div class="title-sub">SECTOR 01: NONLOCAL INTERIOR SPACE</div>
+    </div>
+    <div class="menu-options">
+      <button id="btn-start-game" class="menu-btn">ENTER ANOMALY</button>
+      <div style="margin-top: 15px; font-size: 0.85rem; color: #88aa88; text-align: center; line-height: 1.5; letter-spacing: 1px;">
+        <div>[W][A][S][D] — MOVE</div>
+        <div>[ARROW KEYS] / MOUSE — LOOK</div>
+        <div>[SHIFT] — SPRINT &nbsp;|&nbsp; [F] — FLASHLIGHT</div>
+        <div>[E] — EXAMINE &nbsp;|&nbsp; [Q] — AUDIO ARCHIVE</div>
+        <div>[T] — DEV & SETTINGS MENU &nbsp;|&nbsp; [1-6] — ITEMS</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Level 1 Complete Screen -->
+  <div id="level-complete-screen">
+    <h1 class="level-complete-title">LEVEL 1 COMPLETE</h1>
+    <div class="level-complete-sub">THE BACKROOMS ARE NOT EMPTY.</div>
+    <div style="margin-top: 30px;">
+      <button id="btn-restart-game" class="menu-btn">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <!-- Engine Script Loader -->
+  <script type="module" src="js/main.js"></script>
+
+  <!-- Live Hot-Reload Client (Zero Restart Required) -->
+  <script>
+    if (window.location.protocol.startsWith('http')) {
+      try {
+        const es = new EventSource('/__livereload');
+        es.onmessage = (e) => {
+          if (e.data === 'reload') {
+            console.log('[DevServer] Hot change detected -> refreshing...');
+            window.location.reload();
+          }
+        };
+      } catch (e) {}
+    }
+  </script>
+</body>
+</html>
