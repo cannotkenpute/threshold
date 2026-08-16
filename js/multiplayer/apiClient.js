@@ -34,8 +34,14 @@ export async function callApi(path, { method = 'GET', body } = {}) {
     throw new ApiError('UNKNOWN_ERROR', `Server returned an invalid response (HTTP ${res.status})`);
   }
 
+  // Error responses are shaped { error: { code, message } } (see
+  // api/multiplayer/_shared/response.js sendError/sendRpcResult) -- NOT flat
+  // { code, reason }. Reading the flat shape here always fell through to the
+  // UNKNOWN_ERROR / "HTTP <status>" fallback, hiding the real code (e.g.
+  // INVALID_STATE, NOT_ALL_READY) behind a bare "HTTP 400" banner.
   if (!res.ok || json.ok === false) {
-    throw new ApiError(json.code || 'UNKNOWN_ERROR', json.reason || `HTTP ${res.status}`);
+    const err = json.error || {};
+    throw new ApiError(err.code || 'UNKNOWN_ERROR', err.message || `HTTP ${res.status}`);
   }
   return json;
 }

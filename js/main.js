@@ -95,6 +95,8 @@ class GameEngine {
       this.multiplayerAuthority = { transport, selfId, isAuthority };
       this.multiplayerUI.close();
       this.launchSurvivalMode();
+      // Loading barrier: report this client as PLAYING once the scene is up.
+      this.multiplayerManager.markSceneLoaded();
     };
 
     // Cinematics System

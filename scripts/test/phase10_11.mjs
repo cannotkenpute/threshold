@@ -39,8 +39,8 @@ await t('CriticalEventDeduper suppresses duplicates', () => {
   assert.equal(d.seen('e1', 2000), true); // ttl expired -> treated fresh
 });
 
-console.log('Phase 10 — SnapshotBuffer');
-const { SnapshotBuffer } = await import(mp('SnapshotBuffer.js'));
+console.log('Phase 10 — AuthoritySnapshotBuffer');
+const { AuthoritySnapshotBuffer: SnapshotBuffer } = await import(mp('SnapshotBuffer.js'));
 await t('keeps highest valid snapshot within epoch ceiling', () => {
   const b = new SnapshotBuffer({ capacity: 3 });
   b.add({ sequence: 1, authorityEpoch: 1 });

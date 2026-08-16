@@ -129,34 +129,66 @@ export class MultiplayerManager {
     this.matchManager = new MatchManager({
       transport: this.lobbyManager.transport,
       selfId: this.lobbyManager.localPlayerId,
-      lobbyManager: { startMatch: () => matchInfo },
+      lobbyManager: { startMatch: () => matchInfo, getMembers: () => this._activeMemberIds() },
     });
-    const ok = await this.matchManager.beginMatch(this.lobby.id, matchInfo);
-    if (ok) this._wireMatchReady();
+    const ok = await this.matchManager.beginMatch(this.lobby.id, this._normalizeMatchInfo(matchInfo));
+    if (!ok) {
+      this.matchManager = null;
+      throw new Error('MATCH_SETUP_FAILED — match channel or loading barrier could not start.');
+    }
+    this._wireMatchReady();
     return { ok, matchInfo };
+  }
+
+  _activeMemberIds() {
+    const lm = this.lobbyManager;
+    if (!lm || !Array.isArray(lm.members)) return [];
+    return lm.members
+      .filter((m) => m && m.player_id && !['LEFT', 'KICKED'].includes(m.member_state))
+      .map((m) => String(m.player_id));
   }
 
   _normalizeMatchInfo(info) {
     return {
       matchId: info.matchId !== undefined ? info.matchId : info.match_id,
       randomSeed: info.randomSeed !== undefined ? info.randomSeed : info.random_seed,
-      members: info.members || info.memberIds || info.member_ids || [],
+      members: info.members || info.memberIds || info.member_ids || this._activeMemberIds(),
     };
+  }
+
+  /**
+   * Called by the game engine once the local Survival scene finished loading —
+   * satisfies this client's slot in the match loading barrier. Without this,
+   * 'ready' never fires for anyone (barrier deadlock).
+   */
+  markSceneLoaded() {
+    if (this.matchManager && typeof this.matchManager.markPlaying === 'function') {
+      this.matchManager.markPlaying();
+    }
   }
 
   _wireMatchReady() {
     if (!this.matchManager || this._matchReadyWired) return;
     this._matchReadyWired = true;
-    this.matchManager.on('ready', ({ matchId, members, spawns, seed }) => {
-      if (this.onMatchReady) {
-        this.onMatchReady({
-          matchId, members, spawns, seed,
-          selfId: this.lobbyManager ? this.lobbyManager.localPlayerId : null,
-          isAuthority: this.isHost,
-          transport: this.matchTransport,
-        });
-      }
-    });
+    // Launch IMMEDIATELY once the match channel is up — do NOT wait for the
+    // all-members-PLAYING barrier ('ready'): that barrier is only satisfied by
+    // each client calling markSceneLoaded() after its scene loads, so waiting
+    // for it before loading the scene is a deadlock. 'ready' remains a passive
+    // signal for future use (telemetry / unfreeze gating).
+    const mm = this.matchManager;
+    const spawns = {};
+    for (const id of mm.members || []) spawns[id] = mm.getSpawnFor(id);
+    if (this.onMatchReady) {
+      this.onMatchReady({
+        matchId: mm.matchId,
+        members: [...(mm.members || [])],
+        spawns,
+        seed: mm.matchSeed,
+        selfId: this.lobbyManager ? this.lobbyManager.localPlayerId : null,
+        isAuthority: this.isHost,
+        transport: this.matchTransport,
+      });
+    }
   }
 
   async _joinMatchFromBroadcast(matchInfo) {

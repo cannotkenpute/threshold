@@ -274,24 +274,38 @@ export class MultiplayerUI {
 
     if (this.readyBtn) {
       this.readyBtn.addEventListener('click', async () => {
+        if (this._togglingReady) return;
+        this._togglingReady = true;
         this._clearError();
         try {
           this._isReady = !this._isReady;
           await this.manager.setReady(this._isReady);
-          this._renderLobbyView();
         } catch (err) {
           this._isReady = !this._isReady;
           this._showError(err);
+        } finally {
+          this._togglingReady = false;
+          this._renderLobbyView();
         }
       });
     }
     if (this.startBtn) {
       this.startBtn.addEventListener('click', async () => {
+        // Guards against a real double-click (or an impatient second click while the
+        // first request is still in flight) firing startMatch() twice: the first call
+        // flips the lobby out of OPEN, so the second sees INVALID_STATE even though the
+        // match already started successfully.
+        if (this._starting) return;
+        this._starting = true;
         this._clearError();
+        this.startBtn.disabled = true;
         try {
           await this.manager.startMatch();
         } catch (err) {
           this._showError(err);
+        } finally {
+          this._starting = false;
+          this._renderLobbyView();
         }
       });
     }
