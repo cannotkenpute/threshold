@@ -768,7 +768,8 @@ canvas {
    screen (#title-screen is z-index 100, above .modal-overlay's 50), so they need the
    same elevated stacking context as the changelog or the title buttons overlap them. */
 #soundtrack-modal,
-#options-modal {
+#options-modal,
+#multiplayer-modal {
   z-index: 150;
 }
 
@@ -1767,6 +1768,25 @@ canvas {
   box-shadow: 0 0 10px rgba(187, 136, 255, 0.5);
 }
 
+.dev-monster-status {
+  margin-top: 10px;
+  min-height: 1.1em;
+  font-family: var(--ui-font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 1px;
+  color: #88ee99;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.dev-monster-status.active {
+  opacity: 1;
+}
+
+.dev-monster-status.error {
+  color: #ff8888;
+}
+
 /* 1980s Driving Escape Cutscene Overlay */
 .cutscene-overlay {
   position: absolute;
@@ -2375,4 +2395,203 @@ canvas {
   border-radius: 2px;
   z-index: 270;
   animation: fade-in 0.4s ease;
+}
+
+/* Multiplayer Lobby Modal — reuses the .options-container terminal/CRT skin */
+.multiplayer-container {
+  background: #0d120a;
+  border: 3px solid #4a5c40;
+  box-shadow: 0 0 30px rgba(0,0,0,0.9), inset 0 0 15px rgba(51, 255, 102, 0.15);
+  padding: 30px 40px;
+  width: 560px;
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow-y: auto;
+  font-family: var(--ui-font-mono);
+  color: var(--crt-green);
+  scrollbar-width: thin;
+  scrollbar-color: #4a663b #0a0f08;
+}
+
+.mp-error {
+  background: rgba(138, 28, 20, 0.25);
+  border: 1px solid var(--paper-red, #8a1c14);
+  color: #ff8a80;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 0.85rem;
+  letter-spacing: 0.5px;
+}
+
+.mp-view {
+  display: none;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mp-view.active {
+  display: flex;
+}
+
+.mp-menu-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mp-select {
+  background: #182214;
+  border: 1px solid #4a5c40;
+  color: var(--crt-green);
+  font-family: var(--ui-font-mono);
+  padding: 6px 10px;
+  width: 100%;
+}
+
+.mp-filter-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.8rem;
+  color: #aacc99;
+}
+
+.mp-filter-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.mp-lobby-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.mp-lobby-empty {
+  text-align: center;
+  color: #77aa77;
+  padding: 24px 0;
+  letter-spacing: 2px;
+}
+
+.mp-lobby-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(20, 26, 18, 0.6);
+  border: 1px solid #33442a;
+  padding: 10px 14px;
+}
+
+.mp-lobby-host {
+  font-size: 1rem;
+  color: var(--crt-amber);
+  letter-spacing: 1px;
+}
+
+.mp-lobby-meta {
+  font-size: 0.75rem;
+  color: #aacc99;
+  margin-top: 2px;
+}
+
+.mp-code-input {
+  background: #182214;
+  border: 1px solid #4a5c40;
+  color: var(--crt-amber);
+  font-family: var(--ui-font-mono);
+  font-size: 1.8rem;
+  letter-spacing: 10px;
+  text-align: center;
+  padding: 10px;
+  width: 100%;
+}
+
+.mp-lobby-code-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.85rem;
+  color: #aacc99;
+  letter-spacing: 2px;
+}
+
+.mp-lobby-code {
+  font-family: var(--ui-font-mono);
+  font-size: 1.6rem;
+  color: var(--crt-amber);
+  letter-spacing: 6px;
+  text-shadow: 0 0 10px rgba(255, 176, 0, 0.6);
+}
+
+.mp-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mp-slot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(20, 26, 18, 0.6);
+  border: 1px solid #33442a;
+  border-left: 4px solid #33442a;
+  padding: 10px 14px;
+  font-size: 0.95rem;
+}
+
+.mp-slot.empty {
+  color: #557755;
+  font-style: italic;
+}
+
+.mp-slot.host {
+  border-left-color: var(--crt-amber);
+}
+
+.mp-slot.ready:not(.empty) {
+  border-left-color: var(--crt-green);
+}
+
+.mp-slot-name {
+  flex: 1;
+  letter-spacing: 1px;
+}
+
+.mp-slot-badge {
+  font-size: 0.7rem;
+  color: var(--crt-amber);
+  border: 1px solid var(--crt-amber);
+  padding: 2px 6px;
+}
+
+.mp-slot-status {
+  font-size: 0.75rem;
+  color: #aacc99;
+}
+
+.mp-slot.ready:not(.empty) .mp-slot-status {
+  color: var(--crt-green);
+}
+
+.mp-lobby-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.mp-footer-row {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 24px;
+  border-top: 2px solid #2a3c22;
+  padding-top: 16px;
 }

@@ -34,6 +34,7 @@ export class Player {
     // Survival Mode: when true, permadeath applies (no emergency revival on handleDeath()).
     // Set by main.js when Survival Mode launches; SurvivalState composes with this player.
     this.isSurvivalMode = false;
+    this.sensoryEventBus = null;
 
     // Flashlight SpotLight (Attached to camera)
     this.flashlight = new THREE.SpotLight(
@@ -347,6 +348,7 @@ export class Player {
       if (this.audioManager) {
         this.audioManager.playUI('click');
       }
+      this.emitSensoryEvent('player:flashlight', 0);
       return;
     }
     this.isFlashlightOn = !this.isFlashlightOn;
@@ -357,6 +359,16 @@ export class Player {
     if (this.audioManager) {
       this.audioManager.playUI('click');
     }
+    this.emitSensoryEvent('player:flashlight', isLit ? 0.8 : 0.2);
+  }
+
+  setSensoryEventBus(bus) {
+    this.sensoryEventBus = bus || null;
+  }
+
+  emitSensoryEvent(type, intensity) {
+    if (!this.sensoryEventBus) return;
+    this.sensoryEventBus.emit(type, { position: this.position, intensity });
   }
 
   reloadBattery() {
@@ -474,7 +486,12 @@ export class Player {
       if (this.footstepTimer >= stepInterval) {
         this.footstepTimer = 0;
         const currentSurface = this.detectCurrentSurface();
-        this.audioManager.playFootstep(currentSurface, true, this.isSprinting ? 1.2 : 0.8);
+        this.audioManager.playFootstep(currentSurface, true, this.isSprinting ? 1.2 : (this.isCrouching ? 0.4 : 0.8));
+        // Crouching is quieter, not just less frequent -- a lower sensory intensity keeps
+        // proximity/investigate-radius monsters (Drifter, Surveyor, Echo) from noticing a
+        // crouched player at the same range as a standing one, making "hide" a real tactic.
+        const footstepIntensity = this.isSprinting ? 1.0 : (this.isCrouching ? 0.25 : 0.55);
+        this.emitSensoryEvent(this.isSprinting ? 'player:sprint' : 'player:footstep', footstepIntensity);
 
         // Check if player has stepped through the portal into the Backrooms
         if (this.position.z <= 12.0) {
@@ -514,8 +531,10 @@ export class Player {
     } else {
       this.flashlight.visible = false;
       if (this.fillLight) this.fillLight.visible = false;
-      // Darkness drains sanity
-      this.sanity = Math.max(0, this.sanity - CONFIG.PLAYER.SANITY_DRAIN_DARKNESS * h);
+      const isEnvironmentSafe = this.isSurvivalMode && this.survivalState?.environmentSafety?.isSafe;
+      if (!isEnvironmentSafe) {
+        this.sanity = Math.max(0, this.sanity - CONFIG.PLAYER.SANITY_DRAIN_DARKNESS * h);
+      }
     }
   }
 

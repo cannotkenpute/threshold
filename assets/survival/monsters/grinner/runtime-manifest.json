@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "id": "grinner",
+  "source": {
+    "name": "The smile (Rigged)",
+    "modelId": "6795ba0b406f4e61993fafebbb94ebd9",
+    "creator": "Vertex Mercher",
+    "url": "https://sketchfab.com/3d-models/the-smile-rigged-6795ba0b406f4e61993fafebbb94ebd9",
+    "license": "CC-BY-4.0",
+    "attributionRequired": true,
+    "retrievedAt": "2026-08-16",
+    "originalTriangleCount": 164736
+  },
+  "model": {
+    "file": "processed/model.glb",
+    "triangleCount": 23060,
+    "bounds": {
+      "min": [
+        -6.501937205897182,
+        5.851451215431783,
+        -17.607194799814213
+      ],
+      "max": [
+        5.472195064301896,
+        13.776310084288989,
+        14.519848231463914
+      ]
+    },
+    "targetHeight": 1.95,
+    "forwardAxis": "-Z",
+    "groundAtY": 0
+  },
+  "textures": [
+    {
+      "file": "processed/model.glb#texture-0",
+      "mimeType": "image/png",
+      "width": 1024,
+      "height": 1024,
+      "maxDimension": 1024
+    },
+    {
+      "file": "processed/model.glb#texture-1",
+      "mimeType": "image/png",
+      "width": 1024,
+      "height": 1024,
+      "maxDimension": 1024
+    }
+  ],
+  "clips": [
+    {
+      "name": "idle",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "approach",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "attack",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "recoil",
+      "embedded": false,
+      "proceduralFallback": true
+    }
+  ],
+  "embeddedAnimations": [],
+  "runtime": {
+    "materialMode": "retro-pbr",
+    "castShadow": false,
+    "receiveShadow": false
+  }
+}

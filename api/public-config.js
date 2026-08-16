@@ -17,33 +17,14 @@
  */
 
 import { getPublicSupabaseConfig } from '../server/loadEnv.js';
-
-const ALLOWED_CORS_ORIGINS = new Set([
-  'http://localhost:8080',
-  'http://127.0.0.1:8080',
-]);
-
-function isAllowedCorsOrigin(origin) {
-  return ALLOWED_CORS_ORIGINS.has(origin);
-}
+import { applyCors } from './_shared/cors.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
   // CORS: same-origin requests need no header; explicitly allow the local dev
   // server origin for cross-origin development against a Vercel deployment.
-  const origin = req.headers && req.headers.origin;
-  if (origin && isAllowedCorsOrigin(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-  }
-
-  if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    res.status(204).end();
-    return;
-  }
+  if (applyCors(req, res, 'GET, OPTIONS')) return;
 
   if (req.method !== 'GET') {
     res.status(405).json({ error: 'Method not allowed' });

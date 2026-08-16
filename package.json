@@ -8,9 +8,17 @@
     "start": "node server.js",
     "lint": "node scripts/lint/check-syntax.mjs",
     "lint:manifests": "node scripts/lint/validate-manifests.mjs",
-    "test:logic": "node scripts/test/multiplayer-logic.mjs"
+    "build:monsters": "node scripts/monsters/build-monster-assets.mjs",
+    "validate:monsters": "node scripts/monsters/validate-monster-manifest.mjs",
+    "test:logic": "node scripts/test/multiplayer-logic.mjs && node scripts/test/lobby-logic.mjs && node scripts/test/monster-logic.mjs"
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  },
+  "devDependencies": {
+    "@gltf-transform/cli": "4.4.2"
   }
 }

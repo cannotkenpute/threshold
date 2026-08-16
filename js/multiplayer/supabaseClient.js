@@ -66,6 +66,28 @@ export async function getSupabaseClient() {
   return _clientPromise;
 }
 
+/**
+ * Ensures the browser has a Supabase Auth session, signing in anonymously if
+ * none exists yet. Player identity is a stable UUID from this session
+ * (THRESHOLD_MULTIPLAYER_ARCHITECTURE.md §3) — never a display name or IP.
+ * Requires anonymous sign-in to be enabled in the Supabase project's Auth
+ * settings (a dashboard toggle, not something a migration can turn on).
+ */
+export async function ensureAnonymousSession() {
+  const client = await getSupabaseClient();
+  const { data: { session } } = await client.auth.getSession();
+  if (session) return session;
+  const { data, error } = await client.auth.signInAnonymously();
+  if (error) throw error;
+  return data.session;
+}
+
+/** Current access token for Authorization headers on /api/multiplayer/* calls. */
+export async function getAccessToken() {
+  const session = await ensureAnonymousSession();
+  return session.access_token;
+}
+
 /** Lightweight connectivity check for menus/diagnostics. Returns { ok, status }. */
 export async function checkConnection() {
   try {

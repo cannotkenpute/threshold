@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "watcher",
+  "source": {
+    "name": "Horror Humanoid Creature",
+    "modelId": "b5874b20f8c34b919a52eb3cb7dad94c",
+    "creator": "PurplePoint",
+    "url": "https://sketchfab.com/3d-models/horror-humanoid-creature-b5874b20f8c34b919a52eb3cb7dad94c",
+    "license": "CC-BY-4.0",
+    "attributionRequired": true,
+    "retrievedAt": "2026-08-16",
+    "originalTriangleCount": 95786
+  },
+  "model": {
+    "file": "processed/model.glb",
+    "triangleCount": 23910,
+    "bounds": {
+      "min": [
+        -0.4991700053215027,
+        -0.996632993221283,
+        -0.43098899722099304
+      ],
+      "max": [
+        0.49066200852394104,
+        0.9945110082626343,
+        0.42250001430511475
+      ]
+    },
+    "targetHeight": 2.7,
+    "forwardAxis": "-Z",
+    "groundAtY": 0
+  },
+  "textures": [
+    {
+      "file": "processed/model.glb#texture-0",
+      "mimeType": "image/jpeg",
+      "width": 1024,
+      "height": 1024,
+      "maxDimension": 1024
+    },
+    {
+      "file": "processed/model.glb#texture-1",
+      "mimeType": "image/png",
+      "width": 1024,
+      "height": 1024,
+      "maxDimension": 1024
+    },
+    {
+      "file": "processed/model.glb#texture-2",
+      "mimeType": "image/jpeg",
+      "width": 1024,
+      "height": 1024,
+      "maxDimension": 1024
+    }
+  ],
+  "clips": [
+    {
+      "name": "idle",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "walk",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "reach",
+      "embedded": false,
+      "proceduralFallback": true
+    }
+  ],
+  "embeddedAnimations": [],
+  "runtime": {
+    "materialMode": "retro-pbr",
+    "castShadow": false,
+    "receiveShadow": false
+  }
+}

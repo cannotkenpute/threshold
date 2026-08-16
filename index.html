@@ -18,6 +18,7 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
 </head>
 <body>
   <!-- 3D Canvas Viewport -->
@@ -421,7 +422,131 @@
         </div>
       </div>
 
+      <!-- Developer / Debug Monster Summon (Survival Mode only, passive) -->
+      <div class="dev-menu-section">
+        <div class="dev-menu-header">
+          <span class="dev-badge">[DEV]</span>
+          <span class="dev-title">SUMMON MONSTER (PASSIVE, SURVIVAL ONLY)</span>
+        </div>
+        <div class="dev-teleport-grid">
+          <button class="dev-btn dev-monster-btn" data-monster="watcher">👁️ WATCHER</button>
+          <button class="dev-btn dev-monster-btn" data-monster="mimic">📦 MIMIC</button>
+          <button class="dev-btn dev-monster-btn" data-monster="drifter">🚶 DRIFTER</button>
+          <button class="dev-btn dev-monster-btn" data-monster="static">📺 STATIC</button>
+          <button class="dev-btn dev-monster-btn" data-monster="hollow_man">🕴️ HOLLOW MAN</button>
+          <button class="dev-btn dev-monster-btn" data-monster="grinner">😬 GRINNER</button>
+          <button class="dev-btn dev-monster-btn" data-monster="surveyor">🧭 SURVEYOR</button>
+          <button class="dev-btn dev-monster-btn" data-monster="crawling_mass">🕸️ CRAWLING MASS</button>
+          <button class="dev-btn dev-monster-btn" data-monster="echo">🔁 ECHO</button>
+          <button class="dev-btn dev-monster-btn" data-monster="threshold">🌀 THRESHOLD</button>
+        </div>
+        <div id="dev-monster-status" class="dev-monster-status"></div>
+      </div>
+
       <div class="options-footer-hint">PRESS [T] OR [ESC] TO CLOSE SETTINGS & RETURN TO GAMEPLAY</div>
+    </div>
+  </div>
+
+  <!-- Multiplayer Lobby Modal -->
+  <div id="multiplayer-modal" class="modal-overlay">
+    <div class="multiplayer-container">
+      <div class="options-header">
+        <div class="options-tag">DEPT. OF SPATIAL ANOMALY // CO-OP UPLINK</div>
+        <h2 class="options-title">MULTIPLAYER</h2>
+      </div>
+
+      <div id="mp-error" class="mp-error" style="display:none;"></div>
+
+      <!-- Main menu -->
+      <div class="mp-view active" data-view="menu">
+        <div class="mp-menu-options">
+          <button id="mp-btn-quick-join" class="menu-btn">QUICK JOIN</button>
+          <button id="mp-btn-browse" class="menu-btn">PUBLIC LOBBIES</button>
+          <button id="mp-btn-create" class="menu-btn">CREATE LOBBY</button>
+          <button id="mp-btn-code" class="menu-btn">JOIN WITH CODE</button>
+        </div>
+      </div>
+
+      <!-- Public lobby browser -->
+      <div class="mp-view" data-view="browser">
+        <div class="mp-filter-row">
+          <label>REGION
+            <select id="mp-browser-region" class="mp-select">
+              <option value="">ALL</option>
+              <option value="AUTO">AUTO</option>
+              <option value="US_EAST">US EAST</option>
+              <option value="US_WEST">US WEST</option>
+              <option value="EUROPE">EUROPE</option>
+              <option value="ASIA">ASIA</option>
+              <option value="OCEANIA">OCEANIA</option>
+              <option value="SOUTH_AMERICA">SOUTH AMERICA</option>
+            </select>
+          </label>
+          <button id="mp-btn-refresh" class="deck-btn">REFRESH</button>
+        </div>
+        <div id="mp-lobby-list" class="mp-lobby-list"></div>
+        <button id="mp-btn-load-more" class="deck-btn" style="display:none;">LOAD MORE</button>
+      </div>
+
+      <!-- Create lobby -->
+      <div class="mp-view" data-view="create">
+        <div class="option-group">
+          <label class="option-label">VISIBILITY</label>
+          <select id="mp-create-visibility" class="mp-select">
+            <option value="PUBLIC">PUBLIC</option>
+            <option value="PRIVATE">PRIVATE</option>
+          </select>
+        </div>
+        <div class="option-group">
+          <label class="option-label">REGION</label>
+          <select id="mp-create-region" class="mp-select">
+            <option value="AUTO">AUTO</option>
+            <option value="US_EAST">US EAST</option>
+            <option value="US_WEST">US WEST</option>
+            <option value="EUROPE">EUROPE</option>
+            <option value="ASIA">ASIA</option>
+            <option value="OCEANIA">OCEANIA</option>
+            <option value="SOUTH_AMERICA">SOUTH AMERICA</option>
+          </select>
+        </div>
+        <div class="option-group">
+          <label class="option-label">DIFFICULTY</label>
+          <select id="mp-create-difficulty" class="mp-select">
+            <option value="NORMAL">NORMAL</option>
+            <option value="HARD">HARD</option>
+          </select>
+        </div>
+        <button id="mp-btn-create-submit" class="menu-btn">CREATE</button>
+      </div>
+
+      <!-- Join with code -->
+      <div class="mp-view" data-view="code">
+        <div class="option-group">
+          <label class="option-label" for="mp-code-input">ENTER LOBBY CODE</label>
+          <input id="mp-code-input" class="mp-code-input" type="text" inputmode="numeric" maxlength="5" placeholder="00000">
+        </div>
+        <button id="mp-btn-code-submit" class="menu-btn">JOIN</button>
+      </div>
+
+      <!-- Lobby screen -->
+      <div class="mp-view" data-view="lobby">
+        <div id="mp-lobby-code-row" class="mp-lobby-code-row">
+          <span>CODE</span>
+          <span id="mp-lobby-code" class="mp-lobby-code"></span>
+          <button id="mp-btn-copy-code" class="deck-btn">COPY</button>
+        </div>
+        <div id="mp-slots" class="mp-slots"></div>
+        <div class="mp-lobby-actions">
+          <button id="mp-btn-ready" class="menu-btn">READY</button>
+          <button id="mp-btn-start" class="menu-btn" disabled>START</button>
+          <button id="mp-btn-leave" class="deck-btn">LEAVE</button>
+        </div>
+      </div>
+
+      <div class="mp-footer-row">
+        <button id="mp-btn-back" class="deck-btn" style="display:none;">BACK</button>
+        <button id="btn-multiplayer-close" class="deck-btn">CLOSE</button>
+      </div>
     </div>
   </div>
 
@@ -500,6 +625,7 @@
     <div class="menu-options">
       <button id="btn-start-game" class="menu-btn">ENTER ANOMALY</button>
       <button id="btn-survival-mode" class="menu-btn" style="margin-top: 12px;">SURVIVAL PROTOCOL</button>
+      <button id="btn-title-multiplayer" class="menu-btn" style="margin-top: 12px;">MULTIPLAYER</button>
       <button id="btn-title-options" class="menu-btn" style="margin-top: 12px;">OPTIONS</button>
       <button id="btn-title-soundtrack" class="menu-btn" style="margin-top: 12px;">SOUNDTRACK</button>
       <div style="margin-top: 15px; font-size: 0.85rem; color: #88aa88; text-align: center; line-height: 1.5; letter-spacing: 1px;">

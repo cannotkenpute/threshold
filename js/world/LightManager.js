@@ -10,6 +10,8 @@ export class LightManager {
     this.cycleTime = 0.0;
     this.currentPhase = 'DAY';
     this.previousPhase = 'DAY';
+    this._fixtureIdCounter = 0;
+    this._suppressionTokens = new Map();
 
     // --- CONSTANT-SIZE LIGHT POOL ---
     // A fixed number of real THREE.PointLights, repositioned every frame onto the nearest
@@ -66,6 +68,7 @@ export class LightManager {
     this.scene.add(fixtureGroup);
 
     const lightObj = {
+      id: `fixture-${++this._fixtureIdCounter}`,
       group: fixtureGroup,
       tubeMesh,
       baseColor: options.color || 0xffe8a3,
@@ -80,7 +83,8 @@ export class LightManager {
       currentColor: options.color || 0xffe8a3,
       // Scratch fields reused per frame (no per-light object allocation):
       _distSq: 0,
-      _popUntil: 0
+      _popUntil: 0,
+      _suppressionCount: 0,
     };
 
     this.lights.push(lightObj);
@@ -236,6 +240,12 @@ export class LightManager {
         continue;
       }
 
+      if (l._suppressionCount > 0) {
+        l.currentIntensity = 0.0;
+        l.tubeMesh.material.color.setHex(0x111111);
+        continue;
+      }
+
       if (l.isOff) {
         l.currentIntensity = 0.0;
         l.tubeMesh.material.color.setHex(0x111111);
@@ -337,6 +347,54 @@ export class LightManager {
       isDusk: this.currentPhase === 'DUSK',
       isDawn: this.currentPhase === 'DAWN'
     };
+  }
+
+  getSafetyAt(position) {
+    if (!position) return { isSafe: false, score: 0, fixtureId: null, distance: Infinity };
+    let best = null;
+    for (const light of this.lights) {
+      if (light.currentIntensity <= 0.01 || light.isOff || light._suppressionCount > 0) continue;
+      const distance = light.worldPos.distanceTo(position);
+      if (distance >= light.baseDistance) continue;
+      const intensityRatio = Math.min(1, light.currentIntensity / Math.max(0.001, light.baseIntensity));
+      const score = intensityRatio * Math.max(0, 1 - distance / light.baseDistance);
+      if (!best || score > best.score) best = { isSafe: score >= 0.18, score, fixtureId: light.id, distance };
+    }
+    return best || { isSafe: false, score: 0, fixtureId: null, distance: Infinity };
+  }
+
+  suppressFixtures(fixtureIds, token) {
+    if (!token) throw new Error('Fixture suppression requires a token');
+    this.releaseFixtureSuppression(token);
+    const ids = new Set(fixtureIds || []);
+    this._suppressionTokens.set(token, ids);
+    for (const light of this.lights) {
+      if (ids.has(light.id)) light._suppressionCount++;
+    }
+    return token;
+  }
+
+  suppressFixturesNear(position, radius, token) {
+    const radiusSq = Math.max(0, radius) ** 2;
+    const ids = this.lights
+      .filter((light) => light.worldPos.distanceToSquared(position) <= radiusSq)
+      .map((light) => light.id);
+    return this.suppressFixtures(ids, token);
+  }
+
+  releaseFixtureSuppression(token) {
+    const ids = this._suppressionTokens.get(token);
+    if (!ids) return false;
+    for (const light of this.lights) {
+      if (ids.has(light.id)) light._suppressionCount = Math.max(0, light._suppressionCount - 1);
+    }
+    this._suppressionTokens.delete(token);
+    return true;
+  }
+
+  resetSuppressions() {
+    this._suppressionTokens.clear();
+    for (const light of this.lights) light._suppressionCount = 0;
   }
 
   // Climax sequence: Sequential light shutdown wave moving toward player (sound_design.md #911).

@@ -28,6 +28,8 @@ export class LevelBuilder {
     this.regionCache = new Map(); // memoized per-macro-block region grids, keyed by "mbx_mbz"
 
     this.activeChunks = new Map(); // Key: `${cx}_${cz}` -> Chunk data
+    this.chunkLifecycleListeners = new Set();
+    this.notifiedChunkKeys = new Set();
     this.colliders = []; // Global bounding boxes for collision
     this.spatialGrid = new Map(); // Spatial partition for O(1) collision lookups
     this.interactiveObjects = []; // Interactive items/triggers
@@ -642,6 +644,7 @@ export class LevelBuilder {
       this.removeChunk(keys[i]);
     }
     this.activeChunks.clear();
+    this.notifiedChunkKeys.clear();
     this.colliders.length = 0;
     this.spatialGrid.clear();
     this.interactiveObjects.length = 0;
@@ -651,6 +654,7 @@ export class LevelBuilder {
     this.pendingChunkQueue.length = 0;
     this.lastPlayerCX = null;
     this.lastPlayerCZ = null;
+    if (this.lightManager && this.lightManager.resetSuppressions) this.lightManager.resetSuppressions();
 
     if (this.currentLevel !== 3 && this.cityMapModel) {
       this.scene.remove(this.cityMapModel);
@@ -669,6 +673,7 @@ export class LevelBuilder {
       } else {
         this.generateChunk(cx, cz);
       }
+      this.notifyChunkLoaded(key);
     } catch (err) {
       // A throw mid-generation would otherwise propagate out of update() and kill the whole
       // render loop -- the frame never reaches render(), and because WebGL doesn't preserve the
@@ -680,7 +685,33 @@ export class LevelBuilder {
           key, cx, cz, meshes: [], colliders: [], lights: [], interactive: [], flooded: [], failed: true
         });
       }
+      this.notifyChunkLoaded(key);
     }
+  }
+
+  onChunkLifecycle(listener) {
+    if (typeof listener !== 'function') throw new TypeError('Chunk lifecycle listener must be a function');
+    this.chunkLifecycleListeners.add(listener);
+    return () => this.chunkLifecycleListeners.delete(listener);
+  }
+
+  emitChunkLifecycle(type, chunk) {
+    const event = Object.freeze({ type, key: chunk.key, cx: chunk.cx, cz: chunk.cz, chunk });
+    for (const listener of this.chunkLifecycleListeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        console.warn('[LevelBuilder] Chunk lifecycle listener failed:', error);
+      }
+    }
+  }
+
+  notifyChunkLoaded(key) {
+    if (this.notifiedChunkKeys.has(key)) return;
+    const chunk = this.activeChunks.get(key);
+    if (!chunk) return;
+    this.notifiedChunkKeys.add(key);
+    this.emitChunkLifecycle('loaded', chunk);
   }
 
   // Generates queued chunks until the frame's wall-clock budget is spent, closest-to-player
@@ -3068,6 +3099,8 @@ export class LevelBuilder {
     const chunk = this.activeChunks.get(key);
     if (!chunk) return;
 
+    if (this.notifiedChunkKeys.delete(key)) this.emitChunkLifecycle('unloading', chunk);
+
     chunk.meshes.forEach(m => {
       this.scene.remove(m);
       if (m.geometry) m.geometry.dispose();
@@ -3194,6 +3227,20 @@ export class LevelBuilder {
       }
     }
     return nearby;
+  }
+
+  isPositionWalkable(pos, radius = 0.4, height = 1.8) {
+    if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.z)) return false;
+    const nearby = this.getNearbyColliders(pos);
+    for (let i = 0; i < nearby.length; i++) {
+      const box = nearby[i];
+      if (!box || box.max.y <= 0.05 || box.min.y >= height) continue;
+      if (
+        pos.x + radius > box.min.x && pos.x - radius < box.max.x &&
+        pos.z + radius > box.min.z && pos.z - radius < box.max.z
+      ) return false;
+    }
+    return true;
   }
 
   // --- CHUNK HELPER BUILDERS ---

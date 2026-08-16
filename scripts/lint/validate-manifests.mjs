@@ -102,8 +102,8 @@ function validateManifest(dirName, manifestPath) {
   }
 
   const textures = manifest.textures;
-  if (!Array.isArray(textures) || textures.length === 0) {
-    violation(where, 'missing non-empty "textures" array');
+  if (!Array.isArray(textures)) {
+    violation(where, 'missing "textures" array');
   } else {
     const limit = manifest.textureExceptionReason
       ? MAX_TEXTURE_DIMENSION_WITH_EXCEPTION

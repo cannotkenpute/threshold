@@ -11,6 +11,7 @@ export class OptionsUI {
     this.renderer = renderer;
     this.player = player;
     this.levelBuilder = levelBuilder;
+    this.monsterDirector = null;
 
     this.modal = document.getElementById('options-modal');
     this.isOpen = false;
@@ -45,6 +46,64 @@ export class OptionsUI {
 
     this.initEvents();
     this.initDevTeleport();
+    this.initDevMonsterSummon();
+  }
+
+  setMonsterDirector(monsterDirector) {
+    this.monsterDirector = monsterDirector;
+  }
+
+  showMonsterStatus(text, isError = false) {
+    const statusEl = document.getElementById('dev-monster-status');
+    if (!statusEl) return;
+    if (this.monsterStatusTimeout) clearTimeout(this.monsterStatusTimeout);
+    statusEl.textContent = text;
+    statusEl.classList.toggle('error', isError);
+    statusEl.classList.add('active');
+    this.monsterStatusTimeout = setTimeout(() => {
+      statusEl.classList.remove('active');
+    }, 3500);
+  }
+
+  initDevMonsterSummon() {
+    const monsterButtons = document.querySelectorAll('.dev-monster-btn');
+    monsterButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const type = btn.getAttribute('data-monster');
+        const label = (btn.textContent || type).trim();
+        if (!type) return;
+        if (!this.monsterDirector) {
+          this.showMonsterStatus('CANNOT SUMMON: START SURVIVAL MODE FIRST', true);
+          return;
+        }
+        if (!this.player) {
+          this.showMonsterStatus('CANNOT SUMMON: NO ACTIVE PLAYER', true);
+          return;
+        }
+
+        // Spawn a couple of meters in front of the player, in view, rather than the
+        // 8-unit-behind-camera debug default -- that default frequently landed outside the
+        // streamed navigation grid and silently failed to find a walkable cell.
+        const camera = this.renderer && this.renderer.camera;
+        const forward = new THREE.Vector3(0, 0, -1);
+        if (camera) camera.getWorldDirection(forward);
+        const summonDistance = 2.5;
+        const position = {
+          // Ground level, not the player's eye height -- monsters stand on the floor like
+          // every other spawn path (see SurvivalMonsterDirector.debugSpawnAll's y: 0).
+          x: this.player.position.x + forward.x * summonDistance,
+          y: 0,
+          z: this.player.position.z + forward.z * summonDistance,
+        };
+
+        this.monsterDirector.spawnDebug(type, position, { passive: true }).then(() => {
+          this.showMonsterStatus(`${label} SUMMONED NEAR PLAYER`);
+        }).catch((error) => {
+          console.warn(`[DevMenu] Failed to summon ${type}:`, error);
+          this.showMonsterStatus(`FAILED TO SUMMON ${label}: ${error.message || error}`, true);
+        });
+      });
+    });
   }
 
   initDevTeleport() {

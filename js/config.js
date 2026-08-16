@@ -88,6 +88,29 @@ export const CONFIG = {
     CRITICAL_DAMAGE_MIN: 0.6,       // HP/s at the start of a CRITICAL Fear Factor streak (81-100)
     CRITICAL_DAMAGE_MAX: 1.5,       // HP/s after 15s of continuous CRITICAL Fear Factor
     CRITICAL_RAMP_DURATION: 15,     // seconds to ramp from MIN to MAX damage
+    SAFE_LIGHT_RECOVERY_RATE: 5.0,  // Sanity/s at full environmental-light safety
+    MONSTERS: {
+      MANIFEST_ROOT: './assets/survival/monsters',
+      SCHEDULER_INTERVAL: 5,
+      DAY_COOLDOWN: 45,
+      NIGHT_COOLDOWN: 25,
+      SPAWN_DISTANCE_MIN: 16,
+      SPAWN_DISTANCE_MAX: 38,
+      NAV_CELL_SIZE: 1,
+      NAV_MAX_NODES: 1200,
+      TYPES: {
+        watcher: { unlockCycle: 1, category: 'roaming', weight: 1.0, speed: 2.4, gazeFearRate: 7.0, proximityFearRate: 5.0, proximityRadius: 5.0, observationConeDegrees: 60 },
+        mimic: { unlockCycle: 1, category: 'mimic', weight: 0.7, revealRadius: 2.2, revealFearSpike: 18.0, revealLinger: 2.5 },
+        drifter: { unlockCycle: 2, category: 'roaming', weight: 0.9, patrolSpeed: 2.6, chaseSpeed: 4.6, investigateRadius: 14, proximityRadius: 2.5, proximityFearRate: 6.0 },
+        static: { unlockCycle: 2, category: 'roaming', weight: 0.75, speed: 1.4, suppressRadius: 9, vhsRadius: 7, flashlightDrainRate: 4.0, proximityRadius: 6, proximityFearRate: 3.5 },
+        hollow_man: { unlockCycle: 4, category: 'roaming', weight: 0.7, speed: 2.8, revealRadius: 12, revealFearRate: 5.0, proximityFearRate: 6.0, proximityRadius: 3.0 },
+        grinner: { unlockCycle: 4, category: 'roaming', weight: 0.7, nightOnly: true, speed: 3.2, exposureToRepel: 1.5, exposureIncrementPerEncounter: 0.5, fearRate: 6.0, proximityRadius: 4.0 },
+        surveyor: { unlockCycle: 6, category: 'roaming', weight: 0.55, speed: 2.8, investigateRadius: 16, proximityFearRate: 5.0, proximityRadius: 2.5 },
+        crawling_mass: { unlockCycle: 6, category: 'environmental', weight: 0.5, spreadInterval: 90, maxCellFraction: 0.15, fearRate: 4.0, cellRadius: 1.5 },
+        echo: { unlockCycle: 8, category: 'roaming', weight: 0.4, speed: 3.0, profileWindow: 300, interceptRadius: 2.0, fearRate: 6.0 },
+        threshold: { unlockCycle: 10, category: 'event', weight: 0.2, minDuration: 20, maxDuration: 35, sightFearRate: 12.0, suppressRadius: 40 },
+      },
+    },
     // Cycle-driven item spawn scarcity multiplier (higher = rarer drops). Cycle 1 is the
     // starting cycle; each subsequent cycle (incremented on DAWN) tightens supply.
     scarcityMultiplier(cycleNumber) {

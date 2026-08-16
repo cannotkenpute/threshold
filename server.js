@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv, getPublicSupabaseConfig } from './server/loadEnv.js';
+import { handleApiRequest } from './server/apiRouter.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -58,7 +59,7 @@ fs.watch(ROOT, { recursive: true }, (eventType, filename) => {
   }, 100);
 });
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   // 1. Live Reload EventSource Endpoint
   if (req.url === '/__livereload') {
     res.writeHead(200, {
@@ -84,6 +85,14 @@ const server = http.createServer((req, res) => {
     });
     res.end(body);
     return;
+  }
+
+  // 3. Multiplayer lobby API routes (api/multiplayer/**), run through a thin
+  //    local adapter so the exact same handler modules serve both `node
+  //    server.js` and a Vercel deployment.
+  if (req.url.split('?')[0].startsWith('/api/')) {
+    const handled = await handleApiRequest(req, res);
+    if (handled) return;
   }
 
   // Parse requested URL

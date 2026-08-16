@@ -1,103 +1,74 @@
--- ============================================================================
--- THRESHOLD Multiplayer — 0005_cleanup_jobs.sql
--- pg_cron maintenance schedules (Supabase Dashboard > Database > Cron).
---
--- Jobs (all idempotent — re-running this file reschedules, never duplicates):
---   * threshold-close-stale-lobbies    every minute   close_stale_multiplayer_lobbies()
---   * threshold-abort-stale-matches    every 5 min    abort PAUSED_AUTHORITY > 30 min
---   * threshold-delete-closed-lobbies  hourly         delete CLOSED lobbies > 24 h
--- ============================================================================
+-- THRESHOLD Multiplayer — Phase 11 cleanup jobs
+-- Depends on 0001_multiplayer_schema.sql (tables) + 0003 RPCs (not included here).
+-- Safe to run repeatedly (idempotent function definition).
 
--- Safe on Supabase; degrades to a notice on environments without pg_cron.
-DO $$
-BEGIN
-  CREATE EXTENSION IF NOT EXISTS pg_cron;
-EXCEPTION
-  WHEN OTHERS THEN
-    RAISE NOTICE 'pg_cron unavailable, cleanup jobs not scheduled: %', SQLERRM;
-END $$;
+-- Close abandoned/stale lobbies and release their join codes for reuse.
+-- §33/§48: empty OPEN lobbies close after a grace period; codes recycle after cooldown.
+create or replace function public.close_stale_multiplayer_lobbies(
+  p_empty_grace_seconds integer default 60,
+  p_open_max_age_seconds integer default 3600,
+  p_code_cooldown_seconds integer default 900
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_closed integer := 0;
+begin
+  -- 1. Close lobbies with no connected members past the empty grace window.
+  with empty_lobbies as (
+    select l.id
+    from multiplayer_lobbies l
+    where l.status in ('CREATING', 'OPEN', 'STARTING')
+      and not exists (
+        select 1 from multiplayer_lobby_members m
+        where m.lobby_id = l.id
+          and m.member_state in ('JOINING','CONNECTED','READY','LOADING','PLAYING')
+          and m.last_seen_at > now() - make_interval(secs => p_empty_grace_seconds)
+      )
+  )
+  update multiplayer_lobbies l
+     set status = 'CLOSED',
+         closed_at = now(),
+         updated_at = now(),
+         code_release_at = now() + make_interval(secs => p_code_cooldown_seconds)
+    from empty_lobbies e
+   where l.id = e.id;
+  get diagnostics v_closed = row_count;
 
--- Only proceed to schedule when the cron schema actually exists (extension
--- install failed => cron.schedule() is undefined and would abort the script).
+  -- 2. Force-close very old OPEN lobbies regardless of membership churn.
+  update multiplayer_lobbies l
+     set status = 'CLOSED',
+         closed_at = now(),
+         updated_at = now(),
+         code_release_at = now() + make_interval(secs => p_code_cooldown_seconds)
+   where l.status in ('CREATING','OPEN')
+     and l.created_at < now() - make_interval(secs => p_open_max_age_seconds);
 
--- ----------------------------------------------------------------------------
--- Harder lobby cleanup: delete CLOSED lobbies older than 24 hours.
--- ON DELETE CASCADE removes their member / match / match_member rows.
--- ----------------------------------------------------------------------------
+  -- 3. Free join codes whose cooldown has elapsed so they can be recycled.
+  update multiplayer_lobbies l
+     set join_code = null,
+         updated_at = now()
+   where l.status = 'CLOSED'
+     and l.join_code is not null
+     and l.code_release_at is not null
+     and l.code_release_at <= now();
 
-CREATE OR REPLACE FUNCTION public.delete_old_closed_lobbies()
-RETURNS integer
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-  v_rows integer;
-BEGIN
-  DELETE FROM public.multiplayer_lobbies
-  WHERE status = 'CLOSED'
-    AND closed_at < now() - interval '24 hours';
-  GET DIAGNOSTICS v_rows = ROW_COUNT;
-  RETURN v_rows;
-END;
+  return v_closed;
+end;
 $$;
 
--- ----------------------------------------------------------------------------
--- Match cleanup: abort matches stuck in PAUSED_AUTHORITY for > 30 minutes
--- (nobody reclaimed authority; matches.updated_at is maintained by the
--- trigger from 0001 and records the moment of the last status change).
--- ----------------------------------------------------------------------------
-
-CREATE OR REPLACE FUNCTION public.abort_stale_authority_matches()
-RETURNS integer
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-  v_rows integer;
-BEGIN
-  UPDATE public.multiplayer_matches
-  SET status = 'ABORTED',
-      ended_at = now()
-  WHERE status = 'PAUSED_AUTHORITY'
-    AND updated_at < now() - interval '30 minutes';
-  GET DIAGNOSTICS v_rows = ROW_COUNT;
-  RETURN v_rows;
-END;
+-- Schedule via pg_cron if available (no-op if the extension is absent).
+do $$
+begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.schedule(
+      'threshold-close-stale-lobbies',
+      '* * * * *',
+      $cron$ select public.close_stale_multiplayer_lobbies(); $cron$
+    );
+  end if;
+end;
 $$;
-
-REVOKE ALL ON FUNCTION public.delete_old_closed_lobbies()    FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.abort_stale_authority_matches() FROM PUBLIC;
-
--- ----------------------------------------------------------------------------
--- Schedules (unschedule-by-name first so re-runs never duplicate jobs)
--- ----------------------------------------------------------------------------
-
-DO $$
-DECLARE
-  job text;
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'cron') THEN
-    RAISE NOTICE 'cron schema missing; skipping job scheduling';
-    RETURN;
-  END IF;
-
-  job := 'threshold-close-stale-lobbies';
-  IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = job) THEN
-    PERFORM cron.unschedule(job);
-  END IF;
-  PERFORM cron.schedule(job, '* * * * *', 'SELECT public.close_stale_multiplayer_lobbies()');
-
-  job := 'threshold-abort-stale-matches';
-  IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = job) THEN
-    PERFORM cron.unschedule(job);
-  END IF;
-  PERFORM cron.schedule(job, '*/5 * * * *', 'SELECT public.abort_stale_authority_matches()');
-
-  job := 'threshold-delete-closed-lobbies';
-  IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = job) THEN
-    PERFORM cron.unschedule(job);
-  END IF;
-  PERFORM cron.schedule(job, '0 * * * *', 'SELECT public.delete_old_closed_lobbies()');
-END $$;

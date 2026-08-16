@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "id": "drifter",
+  "source": {
+    "name": "Cave monster",
+    "modelId": "4d78d918f0054e95b4cf8f1cbc7855f1",
+    "creator": "Bullcet",
+    "url": "https://sketchfab.com/3d-models/cave-monster-4d78d918f0054e95b4cf8f1cbc7855f1",
+    "license": "CC-BY-4.0",
+    "attributionRequired": true,
+    "retrievedAt": "2026-08-16",
+    "originalTriangleCount": 10056
+  },
+  "model": {
+    "file": "processed/model.glb",
+    "triangleCount": 9660,
+    "bounds": {
+      "min": [
+        -0.6704598418122654,
+        -0.029279068962946825,
+        -0.4683481956313911
+      ],
+      "max": [
+        0.6867342673322407,
+        1.6786973273257049,
+        1.3461977101738096
+      ]
+    },
+    "targetHeight": 1.85,
+    "forwardAxis": "-Z",
+    "groundAtY": 0
+  },
+  "textures": [
+    {
+      "file": "processed/model.glb#texture-0",
+      "mimeType": "image/png",
+      "width": 64,
+      "height": 128,
+      "maxDimension": 128
+    }
+  ],
+  "clips": [
+    {
+      "name": "Standing",
+      "embedded": true,
+      "proceduralFallback": true
+    },
+    {
+      "name": "walk",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "run",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "listen",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "search",
+      "embedded": false,
+      "proceduralFallback": true
+    }
+  ],
+  "embeddedAnimations": [
+    "Standing"
+  ],
+  "runtime": {
+    "materialMode": "retro-pbr",
+    "castShadow": false,
+    "receiveShadow": false
+  }
+}

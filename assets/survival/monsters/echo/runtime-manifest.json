@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "id": "echo",
+  "source": {
+    "name": "Void Stalker",
+    "modelId": "0758ec59a17144248f43a7ac6fcab559",
+    "creator": "SkellyCooks",
+    "url": "https://sketchfab.com/3d-models/void-stalker-0758ec59a17144248f43a7ac6fcab559",
+    "license": "CC-BY-4.0",
+    "attributionRequired": true,
+    "retrievedAt": "2026-08-16",
+    "originalTriangleCount": 20266
+  },
+  "model": {
+    "file": "processed/model.glb",
+    "triangleCount": 20266,
+    "bounds": {
+      "min": [
+        -0.40700146555900574,
+        -0.5011259317398071,
+        -0.5004047751426697
+      ],
+      "max": [
+        0.4087594151496887,
+        0.499746710062027,
+        0.49977219104766846
+      ]
+    },
+    "targetHeight": 2.2,
+    "forwardAxis": "-Z",
+    "groundAtY": 0
+  },
+  "textures": [
+    {
+      "file": "processed/model.glb#texture-0",
+      "mimeType": "image/png",
+      "width": 1024,
+      "height": 1024,
+      "maxDimension": 1024
+    }
+  ],
+  "clips": [
+    {
+      "name": "idle",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "walk",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "run",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "attack",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "crouch",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "inspect",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "peek",
+      "embedded": false,
+      "proceduralFallback": true
+    }
+  ],
+  "embeddedAnimations": [],
+  "runtime": {
+    "materialMode": "retro-pbr",
+    "castShadow": false,
+    "receiveShadow": false
+  }
+}

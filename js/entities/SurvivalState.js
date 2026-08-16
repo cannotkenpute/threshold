@@ -8,8 +8,9 @@
 import { CONFIG } from '../config.js';
 
 export class SurvivalState {
-  constructor(player) {
+  constructor(player, lightManager = null) {
     this.player = player;
+    this.lightManager = lightManager;
 
     this.hunger = 100;
     this.thirst = 100;
@@ -18,6 +19,7 @@ export class SurvivalState {
 
     // Tracks how long Fear Factor has been continuously in the CRITICAL band (81-100)
     this.criticalStreakTime = 0;
+    this.environmentSafety = { isSafe: false, score: 0, fixtureId: null, distance: Infinity };
   }
 
   // Fear Factor reuses the existing tuned sanity system, inverted (not a separate stat).
@@ -33,6 +35,16 @@ export class SurvivalState {
     this.timeSurvived += delta;
 
     const cfg = CONFIG.SURVIVAL;
+
+    this.environmentSafety = this.lightManager && this.lightManager.getSafetyAt
+      ? this.lightManager.getSafetyAt(this.player.position)
+      : { isSafe: false, score: 0, fixtureId: null, distance: Infinity };
+    if (this.environmentSafety.isSafe) {
+      this.player.sanity = Math.min(
+        CONFIG.PLAYER.MAX_SANITY,
+        this.player.sanity + cfg.SAFE_LIGHT_RECOVERY_RATE * this.environmentSafety.score * delta
+      );
+    }
 
     // Drain hunger & thirst
     this.hunger = Math.max(0, this.hunger - cfg.HUNGER_DRAIN_RATE * delta);

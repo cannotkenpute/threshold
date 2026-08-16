@@ -14,6 +14,7 @@ import { LevelBuilder } from './world/LevelBuilder.js';
 import { Player } from './entities/Player.js';
 import { SurvivalState } from './entities/SurvivalState.js';
 import { EntityDirector } from './entities/EntityDirector.js';
+import { SurvivalMonsterDirector } from './survival/SurvivalMonsterDirector.js';
 import { Inventory } from './items/Inventory.js';
 import { HUDManager } from './ui/HUD.js';
 import { InventoryUI } from './ui/InventoryUI.js';
@@ -21,6 +22,9 @@ import { CassetteUI } from './ui/CassetteUI.js';
 import { DialogueUI } from './ui/DialogueUI.js';
 import { OptionsUI } from './ui/OptionsUI.js';
 import { ArchiveUI } from './ui/ArchiveUI.js';
+import { MultiplayerUI } from './ui/MultiplayerUI.js';
+import { MultiplayerManager } from './multiplayer/MultiplayerManager.js';
+import { MatchAuthorityController } from './multiplayer/MatchAuthorityController.js';
 import { EscapeCutscene } from './cinematics/EscapeCutscene.js';
 import { OpeningSequence } from './cinematics/OpeningSequence.js';
 
@@ -76,11 +80,22 @@ class GameEngine {
       this.lightManager,
       this.shiftingSpace
     );
+    this.survivalMonsterDirector = null;
 
     // Input & Options (with dev teleport capabilities)
     this.input = new InputManager(document.body, (action) => this.handleAction(action));
     this.optionsUI = new OptionsUI(this.audio, this.input, this.renderer, this.player, this.levelBuilder);
     this.archiveUI = new ArchiveUI(this.cassettePlayer, this.audio, this.input);
+    this.multiplayerManager = new MultiplayerManager();
+    this.multiplayerUI = new MultiplayerUI(this.multiplayerManager);
+
+    // Phase 8: when the match loading barrier completes, enter Survival and hand the
+    // host its authority config (clients get a renderer + non-authoritative sync).
+    this.multiplayerManager.onMatchReady = ({ selfId, isAuthority, transport }) => {
+      this.multiplayerAuthority = { transport, selfId, isAuthority };
+      this.multiplayerUI.close();
+      this.launchSurvivalMode();
+    };
 
     // Cinematics System
     this.cutscene = new EscapeCutscene(this.renderer, this.audio, this.state, this.hud, this.dialogue, this.player, this.input, this.levelBuilder);
@@ -193,6 +208,17 @@ class GameEngine {
         this.audio.init();
         this.audio.resume();
         this.optionsUI.openTitle();
+      });
+    }
+
+    // Title screen "MULTIPLAYER" button opens the lobby modal
+    const titleMultiplayerBtn = document.getElementById('btn-title-multiplayer');
+    if (titleMultiplayerBtn && this.multiplayerUI) {
+      titleMultiplayerBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.audio.init();
+        this.audio.resume();
+        this.multiplayerUI.open();
       });
     }
 
@@ -369,13 +395,49 @@ class GameEngine {
     this.player.velocity.set(0, 0, 0);
 
     // Establish Survival sustainment systems & permadeath
-    this.player.survivalState = new SurvivalState(this.player);
+    this.player.survivalState = new SurvivalState(this.player, this.lightManager);
     this.player.isSurvivalMode = true;
     // Read the real current phase rather than assuming 'DAY' -- safe today since every exit
     // path does a full page reload, but this avoids a spurious cycle-1 incrementing itself if
     // that ever changes.
     this.survivalLastPhase = this.lightManager.getCycleInfo().phase;
     this.survivalEnded = false;
+
+    const isMultiplayerClient = Boolean(this.multiplayerAuthority && !this.multiplayerAuthority.isAuthority);
+
+    if (this.survivalMonsterDirector) this.survivalMonsterDirector.dispose();
+    this.survivalMonsterDirector = null;
+
+    if (!isMultiplayerClient) {
+      // Host (authority) or solo: run the authoritative monster AI locally. Non-host
+      // clients never run AI -- they render the host's snapshots via the authority layer.
+      this.survivalMonsterDirector = new SurvivalMonsterDirector({
+        scene: this.renderer.scene,
+        camera: this.renderer.camera,
+        player: this.player,
+        levelBuilder: this.levelBuilder,
+        lightManager: this.lightManager,
+        audioManager: this.audio,
+        renderer: this.renderer,
+      }).start({
+        seed: Math.floor(this.levelBuilder.levelSeed * 100000),
+        authorityMode: this.multiplayerAuthority ? 'host' : 'solo',
+        automaticEncounters: true,
+      });
+      if (this.optionsUI) this.optionsUI.setMonsterDirector(this.survivalMonsterDirector);
+      if (new URLSearchParams(window.location.search).get('survivalDebug') === '1') {
+        window.survivalMonsters = {
+          spawn: (type, position, options) => this.survivalMonsterDirector.spawnDebug(type, position, options),
+          spawnAll: () => this.survivalMonsterDirector.debugSpawnAll(),
+          snapshot: () => this.survivalMonsterDirector.serializeAuthoritySnapshot(),
+          dispose: () => this.survivalMonsterDirector.dispose(),
+        };
+      }
+    }
+
+    // Phase 8: wire host-authoritative Survival state/monsters to the match transport
+    // (no-op in solo Survival, where this.multiplayerAuthority stays unset).
+    this._setupSurvivalAuthority();
 
     if (this.hud && this.hud.survivalVitalsContainer) {
       this.hud.survivalVitalsContainer.style.display = 'flex';
@@ -393,6 +455,8 @@ class GameEngine {
     if (!survivalState || this.survivalEnded) return;
 
     survivalState.tick(delta);
+    if (this.survivalMonsterDirector) this.survivalMonsterDirector.update(delta, survivalState);
+    if (this.survivalAuthority) this.survivalAuthority.update(delta);
 
     // Cycle counter: increments each time the grid cycle transitions into DAWN
     const cycleInfo = this.lightManager.getCycleInfo();
@@ -412,6 +476,30 @@ class GameEngine {
     }
   }
 
+  // Phase 8: bind the host-authoritative Survival authority to a match transport.
+  // `this.multiplayerAuthority` = { transport, selfId, isAuthority }, supplied by the
+  // match flow. Unset in solo Survival, so this is a no-op there.
+  _setupSurvivalAuthority() {
+    if (this.survivalAuthority) {
+      this.survivalAuthority.dispose();
+      this.survivalAuthority = null;
+    }
+    const cfg = this.multiplayerAuthority;
+    if (!cfg || !cfg.transport) return;
+
+    this.survivalAuthority = new MatchAuthorityController({
+      transport: cfg.transport,
+      selfId: cfg.selfId,
+      isAuthority: cfg.isAuthority,
+      scene: cfg.isAuthority ? null : this.renderer.scene,
+    }).attach({
+      director: cfg.isAuthority ? this.survivalMonsterDirector : null,
+      renderer: cfg.isAuthority ? null : undefined,
+    });
+
+    if (cfg.isAuthority) this.survivalAuthority.registerPlayer(cfg.selfId);
+  }
+
   // Survival Mode permadeath end screen: shows time survived & cycles survived, then
   // freezes further Survival ticking. "RETURN TO TITLE" reloads the page (see initTitleScreen).
   triggerSignalLost() {
@@ -419,6 +507,9 @@ class GameEngine {
     this.survivalEnded = true;
     this.isRunning = false;
     this.input.exitLock();
+    if (this.survivalMonsterDirector) this.survivalMonsterDirector.dispose();
+    if (this.optionsUI) this.optionsUI.setMonsterDirector(null);
+    if (this.survivalAuthority) this.survivalAuthority.dispose();
 
     // A safe non-gameplay state: nothing in update() handles PAUSED, so the per-frame
     // Survival/GAMEPLAY subsystems stop advancing while the last frame stays rendered.
@@ -450,6 +541,10 @@ class GameEngine {
           this.archiveUI.close();
           return;
         }
+        if (this.multiplayerUI && this.multiplayerUI.isOpen) {
+          this.multiplayerUI.close();
+          return;
+        }
         if (this.optionsUI.isOpen) {
           this.optionsUI.close();
           return;
@@ -478,6 +573,7 @@ class GameEngine {
     } else if (action === 'interact') {
       this.handlePlayerInteract();
     } else if (action === 'use_item') {
+      if (this.survivalMonsterDirector) this.survivalMonsterDirector.emitPlayerEvent('player:interaction', 0.35);
       this.inventory.useSlot(this.inventory.activeSlotIndex, this.player);
     } else if (action.startsWith('slot_')) {
       const slotIdx = parseInt(action.replace('slot_', '')) - 1;
@@ -487,6 +583,12 @@ class GameEngine {
 
   handlePlayerInteract() {
     const focused = this.player.focusedInteractive;
+    if (this.survivalMonsterDirector) {
+      this.survivalMonsterDirector.emitPlayerEvent('player:interaction', focused ? 0.7 : 0.3);
+      if (focused && ['battery', 'almond_water', 'medkit', 'ration_pack', 'canteen_water'].includes(focused.type)) {
+        this.survivalMonsterDirector.emitPlayerEvent('player:item_collected', 0.8);
+      }
+    }
     if (!focused) {
       // Nothing in the world to pick up/examine -- fall back to using the active inventory slot,
       // so [E] alone covers both actions (no separate right-click/trackpad gesture needed).

@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "static",
+  "source": {
+    "name": "Creeping Shadow Creature - Free Horror 3D Model",
+    "modelId": "53e77576ca0b4c5988ba2991a4bff075",
+    "creator": "PurplePoint",
+    "url": "https://sketchfab.com/3d-models/creeping-shadow-creature-free-horror-3d-model-53e77576ca0b4c5988ba2991a4bff075",
+    "license": "CC-BY-4.0",
+    "attributionRequired": true,
+    "retrievedAt": "2026-08-16",
+    "originalTriangleCount": 99197
+  },
+  "model": {
+    "file": "processed/model.glb",
+    "triangleCount": 23798,
+    "bounds": {
+      "min": [
+        -0.09446951173188012,
+        -0.21112918913681633,
+        -0.06020320708572146
+      ],
+      "max": [
+        0.09459250524259133,
+        0.21119596515528022,
+        0.6719999968010927
+      ]
+    },
+    "targetHeight": 2.1,
+    "forwardAxis": "-Z",
+    "groundAtY": 0
+  },
+  "textures": [
+    {
+      "file": "processed/model.glb#texture-0",
+      "mimeType": "image/jpeg",
+      "width": 1024,
+      "height": 1024,
+      "maxDimension": 1024
+    },
+    {
+      "file": "processed/model.glb#texture-1",
+      "mimeType": "image/png",
+      "width": 1024,
+      "height": 1024,
+      "maxDimension": 1024
+    },
+    {
+      "file": "processed/model.glb#texture-2",
+      "mimeType": "image/jpeg",
+      "width": 1024,
+      "height": 1024,
+      "maxDimension": 1024
+    }
+  ],
+  "clips": [
+    {
+      "name": "idle",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "walk",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "twitch",
+      "embedded": false,
+      "proceduralFallback": true
+    }
+  ],
+  "embeddedAnimations": [],
+  "runtime": {
+    "materialMode": "shadow",
+    "castShadow": false,
+    "receiveShadow": false
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "type": "module",
+  "private": true,
+  "description": "ESM scope marker for THRESHOLD browser multiplayer modules (ignored by browsers; lets Node resolve these .js files as ES modules for testing)."
+}

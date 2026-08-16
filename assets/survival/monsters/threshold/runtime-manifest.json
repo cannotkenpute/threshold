@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "id": "threshold",
+  "source": {
+    "name": "Crimson Eyehand Abomination",
+    "modelId": "c27de05f75094cd681525a048613ba78",
+    "creator": "PurplePoint",
+    "url": "https://sketchfab.com/3d-models/crimson-eyehand-abomination-c27de05f75094cd681525a048613ba78",
+    "license": "CC-BY-4.0",
+    "attributionRequired": true,
+    "retrievedAt": "2026-08-16",
+    "originalTriangleCount": 39924
+  },
+  "model": {
+    "file": "processed/model.glb",
+    "triangleCount": 39924,
+    "bounds": {
+      "min": [
+        -0.5727159976959229,
+        -1,
+        -0.3321689963340759
+      ],
+      "max": [
+        0.5727159976959229,
+        1,
+        0.3321689963340759
+      ]
+    },
+    "targetHeight": 4.2,
+    "forwardAxis": "-Z",
+    "groundAtY": 0
+  },
+  "textures": [
+    {
+      "file": "processed/model.glb#texture-0",
+      "mimeType": "image/jpeg",
+      "width": 2048,
+      "height": 2048,
+      "maxDimension": 2048
+    },
+    {
+      "file": "processed/model.glb#texture-1",
+      "mimeType": "image/png",
+      "width": 2048,
+      "height": 2048,
+      "maxDimension": 2048
+    },
+    {
+      "file": "processed/model.glb#texture-2",
+      "mimeType": "image/jpeg",
+      "width": 2048,
+      "height": 2048,
+      "maxDimension": 2048
+    }
+  ],
+  "clips": [
+    {
+      "name": "idle",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "deform",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "reach",
+      "embedded": false,
+      "proceduralFallback": true
+    }
+  ],
+  "embeddedAnimations": [],
+  "runtime": {
+    "materialMode": "retro-pbr",
+    "castShadow": false,
+    "receiveShadow": false
+  },
+  "textureExceptionReason": "Threshold may retain up to 2048px textures for close-range distortion."
+}

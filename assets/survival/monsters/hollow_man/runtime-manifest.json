@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "hollow_man",
+  "source": {
+    "name": "Hazmat Character Model",
+    "modelId": "f331549106d84a3380fb31111299161e",
+    "creator": "adambilyea",
+    "url": "https://sketchfab.com/3d-models/hazmat-character-model-f331549106d84a3380fb31111299161e",
+    "license": "CC-BY-4.0",
+    "attributionRequired": true,
+    "retrievedAt": "2026-08-16",
+    "originalTriangleCount": 9344
+  },
+  "model": {
+    "file": "processed/model.glb",
+    "triangleCount": 9344,
+    "bounds": {
+      "min": [
+        -7.012379905776977,
+        -7.053029277038574,
+        -3.447341516680717
+      ],
+      "max": [
+        7.012379905776977,
+        6.133489370250701,
+        0.44906656365215775
+      ]
+    },
+    "targetHeight": 1.82,
+    "forwardAxis": "-Z",
+    "groundAtY": 0
+  },
+  "textures": [],
+  "clips": [
+    {
+      "name": "idle",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "walk",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "run",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "reveal",
+      "embedded": false,
+      "proceduralFallback": true
+    },
+    {
+      "name": "attack",
+      "embedded": false,
+      "proceduralFallback": true
+    }
+  ],
+  "embeddedAnimations": [],
+  "runtime": {
+    "materialMode": "retro-pbr",
+    "castShadow": false,
+    "receiveShadow": false
+  }
+}
