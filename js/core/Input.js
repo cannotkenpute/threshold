@@ -58,18 +58,23 @@ export class InputManager {
       this.handleKeyEvent(e, false);
     });
 
-    // Right-click (secondary button) uses/consumes the item in the active inventory slot
+    // [E] alone handles both picking up/examining world items and using the active inventory
+    // slot (see handlePlayerInteract's fallback in main.js) -- still suppress the browser's
+    // right-click menu during pointer lock so a stray right-click doesn't break out of it.
     document.addEventListener('contextmenu', (e) => {
-      // Suppress the default browser context menu during pointer lock
       e.preventDefault();
-      if (this.isLocked && this.onInteractKey) {
-        this.onInteractKey('use_item');
-      }
     });
   }
 
   requestLock() {
-    this.domElement.requestPointerLock();
+    try {
+      const res = this.domElement.requestPointerLock();
+      if (res && res.catch) {
+        res.catch(err => console.warn('Pointer lock request ignored:', err));
+      }
+    } catch (e) {
+      console.warn('Pointer lock error:', e);
+    }
   }
 
   exitLock() {

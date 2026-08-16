@@ -91,6 +91,17 @@ export class ArchiveUI {
         audioTranscript: CONFIG.NARRATIVE.HIGHWAY_POLICE_LOG.audioTranscript,
         icon: '🚓',
         tag: 'RADIO DISPATCH'
+      },
+      {
+        id: 'highway_reed_store_tape',
+        title: 'TIME UNKNOWN — DR. REED: ROADSIDE STORE LOG',
+        speaker: 'Dr. Samuel Reed',
+        role: 'Spatial Physicist',
+        audioFile: CONFIG.NARRATIVE.HIGHWAY_REED_STORE_LOG.audioFile,
+        degradedTape: CONFIG.NARRATIVE.HIGHWAY_REED_STORE_LOG.degradedTape,
+        audioTranscript: CONFIG.NARRATIVE.HIGHWAY_REED_STORE_LOG.audioTranscript,
+        icon: '📼',
+        tag: 'HIGHWAY LOG'
       }
     ];
   }
@@ -229,6 +240,7 @@ export class ArchiveUI {
       title: log.title,
       speaker: log.speaker,
       audioFile: log.audioFile,
+      degradedTape: log.degradedTape,
       audioTranscript: log.audioTranscript
     };
 

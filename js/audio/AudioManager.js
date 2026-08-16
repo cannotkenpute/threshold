@@ -20,6 +20,7 @@ export class AudioManager {
     this.hvacNode = null;
     this.fluorescentNodes = [];
     this.chaseDroneNode = null;
+    this.titleMusicEl = null; // HTMLAudioElement streaming the looping title-screen music
 
     // Ambient event scheduler
     this.ambientCooldown = 12.0;
@@ -35,6 +36,7 @@ export class AudioManager {
       level2: null
     };
     this.currentLevel = 1;
+    this.activeVoiceSources = [];
   }
 
   init() {
@@ -60,7 +62,11 @@ export class AudioManager {
 
     this.isInitialized = true;
     this.preloadFootstepAudio();
-    this.startBaseAmbience();
+    // Ambience is intentionally NOT started here -- init() runs the moment the title screen is
+    // touched (to unlock audio for the title music), and both launchGameplay() and
+    // launchSurvivalMode() already call switchLevelAmbience(1) themselves once actual play
+    // begins. Starting it here as well just layered the gameplay drone underneath the title
+    // music the whole time you were on the menu.
   }
 
   async preloadFootstepAudio() {
@@ -100,8 +106,9 @@ export class AudioManager {
 
   resume() {
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      return this.ctx.resume();
     }
+    return Promise.resolve();
   }
 
   startBaseAmbience(level = 1) {
@@ -348,5 +355,153 @@ export class AudioManager {
     } catch (err) {
       console.warn('Failed to load or play radio voice audio:', err);
     }
+  }
+
+  // --- OPENING CINEMATIC SOUND CONTROLLERS ---
+
+  startOpeningDrone() {
+    if (!this.isInitialized || !this.synth) return;
+    this.stopOpeningDrone(0.1);
+    this.openingDrone = this.synth.createOpeningDrone();
+    this.openingDrone.gainNode.connect(this.buses.AMBIENCE || this.masterGain);
+    return this.openingDrone;
+  }
+
+  stopOpeningDrone(fadeTime = 1.0) {
+    if (this.openingDrone) {
+      this.openingDrone.stop(fadeTime);
+      this.openingDrone = null;
+    }
+  }
+
+  playPaperSlamSound() {
+    if (!this.isInitialized || !this.synth) return;
+    const node = this.synth.playPaperSlam();
+    node.connect(this.buses.UI || this.masterGain);
+  }
+
+  playStampThudSound() {
+    if (!this.isInitialized || !this.synth) return;
+    const node = this.synth.playStampThud();
+    node.connect(this.buses.UI || this.masterGain);
+  }
+
+  playVHSGlitchBurst(duration = 0.4) {
+    if (!this.isInitialized || !this.synth) return;
+    const node = this.synth.playVHSStaticBurst(duration);
+    node.connect(this.buses.ENVIRONMENT || this.masterGain);
+  }
+
+  speakRadioVoice(text, options = {}) {
+    if (!this.isInitialized) return;
+    try {
+      this.playUI('click');
+      if ('speechSynthesis' in window) {
+        // Cancel any pending speech
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = options.rate || 0.88;
+        utterance.pitch = options.pitch || 0.78;
+        utterance.volume = options.volume || 1.0;
+
+        // Pick an authoritative male/deep voice if available
+        const voices = window.speechSynthesis.getVoices();
+        const chosenVoice = voices.find(v => (v.name.includes('David') || v.name.includes('Daniel') || v.name.includes('Male') || v.lang === 'en-US'));
+        if (chosenVoice) utterance.voice = chosenVoice;
+
+        utterance.onend = () => {
+          this.playUI('click');
+          if (options.onEnd) options.onEnd();
+        };
+        window.speechSynthesis.speak(utterance);
+      }
+    } catch (e) {
+      console.warn('speakRadioVoice error:', e);
+    }
+  }
+
+  // Plays an audio file from assets/audio/ if present; otherwise falls back to synthetic radio voice
+  async playVoiceTrack(filename, fallbackText, options = {}) {
+    if (!this.isInitialized) return;
+    const url = `./assets/audio/${filename}`;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`File ${filename} not found (HTTP ${response.status})`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
+
+      this.playUI('click'); // Initial radio click
+
+      const source = this.ctx.createBufferSource();
+      source.buffer = audioBuffer;
+
+      const radioChain = this.synth.createRadioVoiceChain();
+      source.connect(radioChain.input);
+      radioChain.output.connect(this.buses.VOICE || this.masterGain);
+
+      this.activeVoiceSources.push(source);
+
+      source.onended = () => {
+        radioChain.stopHiss();
+        this.playUI('click'); // End radio click
+        const idx = this.activeVoiceSources.indexOf(source);
+        if (idx !== -1) this.activeVoiceSources.splice(idx, 1);
+        if (options.onEnd) options.onEnd();
+      };
+
+      source.start();
+      return source;
+    } catch (err) {
+      // Fallback seamlessly to Web Speech / synthetic voice
+      this.speakRadioVoice(fallbackText, options);
+    }
+  }
+
+  stopAllVoiceTracks() {
+    this.activeVoiceSources.forEach(s => {
+      try { s.stop(); } catch(e){}
+    });
+    this.activeVoiceSources = [];
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  }
+
+  // --- TITLE SCREEN MUSIC ---
+
+  // Plays `title_screen.mp3` on loop via an HTMLAudioElement. Streaming the ~6.5-minute
+  // track is far more robust than the Web Audio `decodeAudioData` path, which had to decode
+  // the whole file into a ~150MB buffer and could fail silently. Idempotent: repeat calls
+  // resume the same element.
+  startTitleMusic() {
+    if (!this.titleMusicEl) {
+      this.titleMusicEl = new Audio('./assets/audio/title_screen.mp3');
+      this.titleMusicEl.loop = true;
+      this.titleMusicEl.volume = 0.6;
+      this.titleMusicEl.preload = 'auto';
+      this.titleMusicEl.addEventListener('error', () => {
+        console.warn('Title music failed to load:', this.titleMusicEl.error);
+      });
+      this.titleMusicEl.addEventListener('playing', () => {
+        console.log('[Audio] Title music started (looping)');
+      });
+    }
+    const playPromise = this.titleMusicEl.play();
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(err => {
+        console.warn('Could not play title music:', err);
+      });
+    }
+  }
+
+  // Stops and rewinds the title music.
+  stopTitleMusic() {
+    if (!this.titleMusicEl) return;
+    try {
+      this.titleMusicEl.pause();
+      this.titleMusicEl.currentTime = 0;
+    } catch (e) {}
   }
 }

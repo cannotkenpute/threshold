@@ -6,17 +6,18 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>PROJECT NULL-VECTOR: LEVEL 1 (1984)</title>
-  <meta name="description" content="1980s Retro 3D First-Person Psychological Horror Game set in The Backrooms.">
+  <title>PROJECT THRESHOLD (1987) — NONLOCAL INTERIOR SPACE</title>
+  <meta name="description" content="1980s Retro 3D First-Person Psychological Horror Game — Project THRESHOLD.">
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/crt.css">
-  <!-- Three.js (r128) & Loaders (FBX, Collada, OBJ, MTL) -->
+  <!-- Three.js (r128) & Loaders (FBX, Collada, OBJ, MTL, glTF) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.0/umd/index.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/ColladaLoader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 </head>
 <body>
   <!-- 3D Canvas Viewport -->
@@ -51,20 +52,62 @@
       <span id="grid-timer-text" class="grid-timer">06:00</span>
     </div>
 
-    <!-- Top Right Mechanical Compass -->
-    <div class="compass-widget">
-      <div class="compass-dial">
-        <div id="compass-needle" class="compass-needle"></div>
-        <div class="compass-center-pin"></div>
-        <div class="compass-cardinal n">N</div>
-        <div class="compass-cardinal s">S</div>
-        <div class="compass-cardinal e">E</div>
-        <div class="compass-cardinal w">W</div>
+    <!-- Top Right Cluster: FPS Counter & Mechanical Compass -->
+    <div class="top-right-hud">
+      <div id="fps-counter-widget" class="fps-counter-widget fps-good">
+        <span class="fps-label">FPS</span>
+        <span id="fps-value-text" class="fps-value">60</span>
+        <span class="fps-label" style="margin-left: 8px;">DRAW</span>
+        <span id="draw-calls-text" class="fps-value">0</span>
+        <span class="fps-label" style="margin-left: 8px;">TRI</span>
+        <span id="tri-count-text" class="fps-value">0</span>
+      </div>
+      <div class="compass-widget">
+        <div class="compass-dial">
+          <div id="compass-needle" class="compass-needle"></div>
+          <div class="compass-center-pin"></div>
+          <div class="compass-cardinal n">N</div>
+          <div class="compass-cardinal s">S</div>
+          <div class="compass-cardinal e">E</div>
+          <div class="compass-cardinal w">W</div>
+        </div>
       </div>
     </div>
 
-    <!-- Bottom Left Analog Vitals (Retro Battery Status & Stamina) -->
+    <!-- Bottom Left Analog Vitals (Retro Biometric Health, Battery Status & Stamina) -->
     <div class="bottom-left-hud">
+      <!-- 1980s Retro Biometric Vitals / Healthbar Meter -->
+      <div class="analog-meter-container retro-vitals-container">
+        <div class="vitals-icon-wrap">
+          <div class="ecg-pulse-frame">
+            <svg class="ecg-icon" viewBox="0 0 28 18">
+              <path class="ecg-bg-line" d="M1 9h5l2.5-6 3.5 12 3.5-8 2 4h9.5"/>
+              <path class="ecg-line" d="M1 9h5l2.5-6 3.5 12 3.5-8 2 4h9.5"/>
+            </svg>
+          </div>
+        </div>
+        <div class="vitals-info">
+          <div class="vitals-header-row">
+            <span class="meter-label">VITALS</span>
+            <span id="health-percent-text" class="health-percent">100%</span>
+          </div>
+          <div class="health-gauge-frame">
+            <div id="health-segments" class="health-segments">
+              <div class="h-seg h-1 active"></div>
+              <div class="h-seg h-2 active"></div>
+              <div class="h-seg h-3 active"></div>
+              <div class="h-seg h-4 active"></div>
+              <div class="h-seg h-5 active"></div>
+              <div class="h-seg h-6 active"></div>
+              <div class="h-seg h-7 active"></div>
+              <div class="h-seg h-8 active"></div>
+              <div class="h-seg h-9 active"></div>
+              <div class="h-seg h-10 active"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="analog-meter-container retro-battery-container">
         <div class="battery-icon-wrap">
           <div class="battery-nub"></div>
@@ -86,6 +129,45 @@
         <span class="meter-label">EXERTION</span>
         <div class="stamina-bar-container">
           <div id="stamina-level-bar" class="stamina-level"></div>
+        </div>
+      </div>
+
+      <!-- Survival Mode Only: Hunger & Thirst Sustainment Meters -->
+      <div id="survival-vitals-container">
+        <div class="analog-meter-container retro-battery-container">
+          <div class="battery-icon-wrap">
+            <div class="battery-nub"></div>
+            <div class="battery-shell">
+              <div id="hunger-segments" class="battery-segments">
+                <div class="seg seg-1"></div>
+                <div class="seg seg-2"></div>
+                <div class="seg seg-3"></div>
+                <div class="seg seg-4"></div>
+              </div>
+            </div>
+          </div>
+          <div class="battery-info">
+            <span class="meter-label">HUNGER</span>
+            <span id="hunger-percent-text" class="battery-percent">100%</span>
+          </div>
+        </div>
+
+        <div class="analog-meter-container retro-battery-container">
+          <div class="battery-icon-wrap">
+            <div class="battery-nub"></div>
+            <div class="battery-shell">
+              <div id="thirst-segments" class="battery-segments">
+                <div class="seg seg-1"></div>
+                <div class="seg seg-2"></div>
+                <div class="seg seg-3"></div>
+                <div class="seg seg-4"></div>
+              </div>
+            </div>
+          </div>
+          <div class="battery-info">
+            <span class="meter-label">THIRST</span>
+            <span id="thirst-percent-text" class="battery-percent">100%</span>
+          </div>
         </div>
       </div>
     </div>
@@ -125,6 +207,21 @@
         Loading document contents...
       </div>
       <div class="dossier-close-hint">[PRESS ESCAPE TO CLOSE DOSSIER]</div>
+    </div>
+  </div>
+
+  <!-- Field Update Bulletin (Changelog) -->
+  <div id="changelog-modal" class="modal-overlay">
+    <div class="dossier-paper">
+      <div class="dossier-stamp">BULLETIN</div>
+      <div class="dossier-header">
+        <h2 class="dossier-title">Field Update Bulletin</h2>
+        <div id="changelog-version" class="dossier-sub">DEPARTMENT OF SPATIAL ANOMALY — DISTRIBUTION: ALL FIELD PERSONNEL</div>
+      </div>
+      <div id="changelog-body" class="dossier-body changelog-body"></div>
+      <div style="margin-top: 24px; text-align: right; flex: none;">
+        <button id="btn-changelog-dismiss" class="menu-btn">ACKNOWLEDGE &amp; CONTINUE</button>
+      </div>
     </div>
   </div>
 
@@ -282,6 +379,15 @@
             <span id="opt-curvature-val" class="slider-val">8%</span>
           </div>
         </div>
+
+        <!-- Video / Performance -->
+        <div class="option-group">
+          <label class="option-label" for="opt-render-scale">RENDER SCALE (RESOLUTION)</label>
+          <div class="slider-row">
+            <input type="range" id="opt-render-scale" min="25" max="100" value="50" class="retro-slider">
+            <span id="opt-render-scale-val" class="slider-val">50%</span>
+          </div>
+        </div>
       </div>
 
       <div class="options-actions">
@@ -309,8 +415,9 @@
           <button class="dev-btn dev-btn-exit" data-warp="lvl2_escape_car">🚗 LEVEL 2: ESCAPE VEHICLE</button>
           <button class="dev-btn dev-btn-lvl2" data-warp="lvl2_sedans">🚗 LEVEL 2: ABANDONED CARS ROW</button>
           <button class="dev-btn dev-btn-lvl2" data-warp="lvl2_deep">🚗 LEVEL 2: DEEP GARAGE SECTOR</button>
-          <button class="dev-btn dev-btn-lvl3" data-warp="lvl3_highway">🛣️ LEVEL 3: THE DARK HIGHWAY</button>
+          <button class="dev-btn dev-btn-lvl3" data-warp="lvl3_highway">🏜️ LEVEL 3: DESERT FREEWAY</button>
           <button class="dev-btn dev-btn-lvl3" data-warp="lvl3_police">🚨 LEVEL 3: ABANDONED PATROL CAR</button>
+          <button class="dev-btn dev-btn-lvl3" data-warp="lvl3_gas_station">⛽ LEVEL 3: GAS STATION</button>
         </div>
       </div>
 
@@ -318,20 +425,88 @@
     </div>
   </div>
 
+  <!-- 1980s Soundtrack Browser Modal -->
+  <div id="soundtrack-modal" class="modal-overlay">
+    <div class="soundtrack-container">
+      <div class="soundtrack-header">
+        <div class="soundtrack-tag">EXPEDITION AUDIO // MAGNETIC TAPE LIBRARY</div>
+        <h2 class="soundtrack-title">SOUNDTRACK</h2>
+      </div>
+
+      <div class="soundtrack-list">
+        <div class="soundtrack-item" data-track="title_screen">
+          <div class="soundtrack-num">01</div>
+          <div class="soundtrack-info">
+            <div class="soundtrack-track-title">Project Zero Hour</div>
+            <div class="soundtrack-track-artist">goosecrash</div>
+          </div>
+          <button id="btn-track-title-screen" class="soundtrack-play-btn" title="Play / Stop">▶</button>
+        </div>
+
+        <div class="soundtrack-item soundtrack-item-locked">
+          <div class="soundtrack-num">02</div>
+          <div class="soundtrack-info">
+            <div class="soundtrack-track-title">COMING SOON</div>
+            <div class="soundtrack-track-artist">&mdash;</div>
+          </div>
+          <span class="soundtrack-soon">SOON</span>
+        </div>
+
+        <div class="soundtrack-item soundtrack-item-locked">
+          <div class="soundtrack-num">03</div>
+          <div class="soundtrack-info">
+            <div class="soundtrack-track-title">COMING SOON</div>
+            <div class="soundtrack-track-artist">&mdash;</div>
+          </div>
+          <span class="soundtrack-soon">SOON</span>
+        </div>
+
+        <div class="soundtrack-item soundtrack-item-locked">
+          <div class="soundtrack-num">04</div>
+          <div class="soundtrack-info">
+            <div class="soundtrack-track-title">COMING SOON</div>
+            <div class="soundtrack-track-artist">&mdash;</div>
+          </div>
+          <span class="soundtrack-soon">SOON</span>
+        </div>
+
+        <div class="soundtrack-item soundtrack-item-locked">
+          <div class="soundtrack-num">05</div>
+          <div class="soundtrack-info">
+            <div class="soundtrack-track-title">COMING SOON</div>
+            <div class="soundtrack-track-artist">&mdash;</div>
+          </div>
+          <span class="soundtrack-soon">SOON</span>
+        </div>
+      </div>
+
+      <div class="soundtrack-actions">
+        <button id="btn-soundtrack-close" class="menu-btn">CLOSE [ESC]</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Opening Cinematic Sequence Overlay -->
+  <div id="opening-sequence-overlay" class="opening-overlay" style="display: none;"></div>
+
   <!-- Title Screen -->
   <div id="title-screen">
     <div class="title-header">
-      <div class="title-dossier-tag">DEPARTMENT OF SPATIAL ANOMALY — CLASSIFIED 1984</div>
-      <h1 class="game-title">THE BACKROOMS</h1>
+      <img src="./assets/textures/department_seal_transparent.png" class="title-seal-emblem" alt="Department of Spatial Anomaly Seal" />
+      <div class="title-dossier-tag">DEPARTMENT OF SPATIAL ANOMALY — CLASSIFIED 1987</div>
+      <h1 class="game-title">THRESHOLD</h1>
       <div class="title-sub">SECTOR 01: NONLOCAL INTERIOR SPACE</div>
     </div>
     <div class="menu-options">
       <button id="btn-start-game" class="menu-btn">ENTER ANOMALY</button>
+      <button id="btn-survival-mode" class="menu-btn" style="margin-top: 12px;">SURVIVAL PROTOCOL</button>
+      <button id="btn-title-options" class="menu-btn" style="margin-top: 12px;">OPTIONS</button>
+      <button id="btn-title-soundtrack" class="menu-btn" style="margin-top: 12px;">SOUNDTRACK</button>
       <div style="margin-top: 15px; font-size: 0.85rem; color: #88aa88; text-align: center; line-height: 1.5; letter-spacing: 1px;">
         <div>[W][A][S][D] — MOVE</div>
         <div>[ARROW KEYS] / MOUSE — LOOK</div>
         <div>[SHIFT] — SPRINT &nbsp;|&nbsp; [F] — FLASHLIGHT</div>
-        <div>[E] — EXAMINE &nbsp;|&nbsp; [Q] — AUDIO ARCHIVE</div>
+        <div>[E] — EXAMINE / USE ITEM &nbsp;|&nbsp; [Q] — AUDIO ARCHIVE</div>
         <div>[T] — DEV & SETTINGS MENU &nbsp;|&nbsp; [1-6] — ITEMS</div>
       </div>
     </div>
@@ -343,6 +518,19 @@
     <div class="level-complete-sub">THE BACKROOMS ARE NOT EMPTY.</div>
     <div style="margin-top: 30px;">
       <button id="btn-restart-game" class="menu-btn">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <!-- Survival Protocol Death Screen -->
+  <div id="signal-lost-screen">
+    <h1 class="level-complete-title signal-lost-title">SIGNAL LOST</h1>
+    <div class="level-complete-sub signal-lost-sub">SUSTAINMENT FAILURE. VITAL SIGNS FLATLINED.</div>
+    <div style="margin-top: 20px; font-family: var(--ui-font-mono); color: #88aa80; text-align: center; line-height: 1.8; letter-spacing: 1px;">
+      <div>TIME SURVIVED: <span id="signal-lost-time">00:00</span></div>
+      <div>CYCLES SURVIVED: <span id="signal-lost-cycles">1</span></div>
+    </div>
+    <div style="margin-top: 30px;">
+      <button id="btn-survival-return" class="menu-btn">RETURN TO TITLE</button>
     </div>
   </div>
 

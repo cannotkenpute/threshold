@@ -23,6 +23,8 @@ export const CONFIG = {
     EYE_HEIGHT_CROUCH: 0.95,
     BOB_FREQUENCY: 7.5,
     BOB_AMPLITUDE: 0.045,
+    MAX_HEALTH: 100,
+    HEALTH_RECOVERY: 1.2,    // per sec when calm
     MAX_STAMINA: 100,
     STAMINA_DRAIN_SPRINT: 22, // per sec
     STAMINA_RECOVERY: 15,    // per sec
@@ -64,6 +66,41 @@ export const CONFIG = {
     DUSK_DURATION: 20,    // 20 seconds of brownout flicker
     NIGHT_DURATION: 200,  // 3.3 minutes of blackout
     DAWN_DURATION: 20,    // 20 seconds of ignition flicker
+  },
+
+  // Performance & frame-pacing tunables
+  PERF: {
+    PHYSICS_HZ: 120,               // fixed player simulation rate
+    MAX_PHYSICS_STEPS: 6,          // per-frame spiral-of-death guard
+    CHUNK_FRAME_BUDGET_MS: 3.0,    // wall-clock budget for streamed chunk generation per frame
+    HUD_UPDATE_INTERVAL: 0.1,      // seconds between throttled HUD refreshes (10Hz)
+    RAYCAST_EVERY_N_FRAMES: 3,     // interaction-focus raycast cadence
+    RENDER_SCALE_DEFAULT: 0.5,     // 3D scene render-target scale (retro low-res + GPU headroom)
+  },
+
+  // Survival Mode: bounded reuse of Level 1 with day/night-driven item scarcity
+  SURVIVAL: {
+    HUNGER_DRAIN_RATE: 100 / 480,   // per sec (~8 min to empty)
+    THIRST_DRAIN_RATE: 100 / 300,   // per sec (~5 min to empty)
+    STARVE_DAMAGE: 0.5,             // HP/s while hunger is at 0
+    DEHYDRATE_DAMAGE: 0.5,          // HP/s while thirst is at 0
+    PANIC_DAMAGE: 0.4,              // HP/s while Fear Factor is in PANIC (61-80)
+    CRITICAL_DAMAGE_MIN: 0.6,       // HP/s at the start of a CRITICAL Fear Factor streak (81-100)
+    CRITICAL_DAMAGE_MAX: 1.5,       // HP/s after 15s of continuous CRITICAL Fear Factor
+    CRITICAL_RAMP_DURATION: 15,     // seconds to ramp from MIN to MAX damage
+    // Cycle-driven item spawn scarcity multiplier (higher = rarer drops). Cycle 1 is the
+    // starting cycle; each subsequent cycle (incremented on DAWN) tightens supply.
+    scarcityMultiplier(cycleNumber) {
+      const table = {
+        1: 1.00, 2: 0.95, 3: 0.90, 4: 0.82, 5: 0.74,
+        6: 0.66, 7: 0.58, 8: 0.50, 9: 0.43, 10: 0.36
+      };
+      if (table[cycleNumber] !== undefined) return table[cycleNumber];
+      if (cycleNumber < 1) return table[1];
+      // Cycle 11+: continue declining ~0.06/cycle from the cycle-10 baseline, floored at 0.10
+      const extraCycles = cycleNumber - 10;
+      return Math.max(0.10, 0.36 - extraCycles * 0.06);
+    }
   },
 
   // Tension States (sound_design.md)
@@ -171,6 +208,36 @@ This entire place is not inert construction material. It's metabolized.`
 Scrawled in red grease pencil:
 "DO NOT TRUST THE HALLWAYS. IT LEARNS WHERE YOU ARE TRYING TO GO."`
     },
+
+    LAB_SUBSTANCE_29_NOTE: {
+      id: "lab_substance_29_note",
+      title: "LAB NOTES — MAY 7TH 1981",
+      author: "UNKNOWN AUTHOR",
+      role: "UNIDENTIFIED SUBSTANCE #29",
+      body: `“We extracted this substance from one of the expeditions, we have not identified the material and atomic structure, we have deemed it dangrous and put it inside a containment tube”`
+    },
+
+    VAUGHN_RESIGNATION_LETTER: {
+      id: "vaughn_resignation",
+      title: "OFFICIAL NOTICE OF RESIGNATION",
+      speaker: "Supervisor Kenneth Vaughn",
+      role: "Operations Supervisor // Dept. of Spatial Anomaly",
+      body: `DEPARTMENT OF SPATIAL ANOMALY
+UNITED STATES OF AMERICA — CLASSIFIED OPERATION DTE-04
+
+FROM: Kenneth Vaughn, Operations Supervisor
+TO: Bureau Directorate & Project Oversight
+DATE: October 14, 1982
+SUBJECT: Official Resignation & Protocol Termination
+
+I, Kenneth Vaughn, hereby submit my formal resignation from the Department of Spatial Anomaly, effective immediately.
+
+Due to the catastrophic turn of events and the sudden severance of the primary lifeline tether, I can no longer oversee this operation in good conscience.
+
+I have left the incoming rescue operation scientist a pre-recorded dispatch on the gateway frequency outlining their initial directive. However, let the record reflect that I hold no realistic hope for their survival, nor the return of the original research expedition.
+
+The anomaly is expanding inward. I am vacating the staging facility before the perimeter seals fail.`
+    },
     
     MERCER_FINAL_TAPE: {
       id: "mercer_final",
@@ -219,6 +286,24 @@ There are abandoned cars every half mile.
 No other traffic. Just dark trees and headlights.
 If anyone hears this... do not pull over into the fog.`,
       text: `Recovered from the passenger seat of an abandoned State Highway Patrol cruiser on the highway shoulder.`
+    },
+
+    HIGHWAY_REED_STORE_LOG: {
+      id: "highway_reed_store_tape",
+      title: "TIME UNKNOWN — DATE UNKNOWN",
+      speaker: "Dr. Samuel Reed",
+      role: "Spatial Physicist",
+      audioFile: "./assets/audio/convenienceStoretape.mp3",
+      degradedTape: true,
+      audioTranscript: `Time unknown.
+Date unknown.
+
+We've been exploring this mysterious highway for miles. When we discovered this convenience store, we thought we found food, but we didn't. It's completely empty.
+
+We are running low on food and water. There's not much we can do but keep moving forward.
+
+The gas pump doesn't work at the gas station.`,
+      text: `Recovered from the middle of the empty roadside convenience store.`
     }
   }
 };

@@ -551,28 +551,44 @@ export class SoundSynthesizer {
   }
 
   // --- CASSETTE SPEECH DSP FILTER ---
-  createCassetteVoiceChain() {
+  createCassetteVoiceChain(options = {}) {
+    const degraded = options.degraded === true;
     // 1980s microcassette frequency curve: 350Hz - 3800Hz with slight distortion and tape hiss
     const input = this.ctx.createGain();
     const output = this.ctx.createGain();
 
     const hpFilter = this.ctx.createBiquadFilter();
     hpFilter.type = 'highpass';
-    hpFilter.frequency.value = 360;
+    hpFilter.frequency.value = degraded ? 470 : 360;
 
     const lpFilter = this.ctx.createBiquadFilter();
     lpFilter.type = 'lowpass';
-    lpFilter.frequency.value = 3600;
+    lpFilter.frequency.value = degraded ? 2550 : 3600;
 
     const midBoost = this.ctx.createBiquadFilter();
     midBoost.type = 'peaking';
     midBoost.frequency.value = 1600;
-    midBoost.gain.value = 4.0;
+    midBoost.gain.value = degraded ? 7.5 : 4.0;
     midBoost.Q.value = 1.2;
 
     input.connect(hpFilter);
     hpFilter.connect(midBoost);
-    midBoost.connect(lpFilter);
+    if (degraded) {
+      const saturation = this.ctx.createWaveShaper();
+      const curve = new Float32Array(44100);
+      const amount = 55;
+      for (let i = 0; i < curve.length; i++) {
+        const x = (i * 2) / curve.length - 1;
+        curve[i] = ((3 + amount) * x * 20 * (Math.PI / 180)) /
+          (Math.PI + amount * Math.abs(x));
+      }
+      saturation.curve = curve;
+      saturation.oversample = '2x';
+      midBoost.connect(saturation);
+      saturation.connect(lpFilter);
+    } else {
+      midBoost.connect(lpFilter);
+    }
     lpFilter.connect(output);
 
     return { input, output };
@@ -727,5 +743,159 @@ export class SoundSynthesizer {
     noise.stop(t + 0.5);
 
     return masterGain;
+  }
+
+  // --- OPENING CINEMATIC SOUND EFFECTS ---
+
+  playPaperSlam() {
+    const t = this.ctx.currentTime;
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0.45;
+
+    // Filtered friction noise burst for paper impact
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = this.noiseBuffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1400, t);
+    filter.frequency.exponentialRampToValueAtTime(400, t + 0.15);
+    filter.Q.value = 1.8;
+
+    const env = this.ctx.createGain();
+    env.gain.setValueAtTime(0.7, t);
+    env.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+
+    noise.connect(filter);
+    filter.connect(env);
+    env.connect(gain);
+
+    noise.start(t);
+    noise.stop(t + 0.2);
+    return gain;
+  }
+
+  playStampThud() {
+    const t = this.ctx.currentTime;
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0.65;
+
+    // Deep wooden / mechanical thud
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(180, t);
+    osc.frequency.exponentialRampToValueAtTime(40, t + 0.12);
+
+    const env = this.ctx.createGain();
+    env.gain.setValueAtTime(0.9, t);
+    env.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+
+    osc.connect(env);
+    env.connect(gain);
+
+    // Initial click impact
+    const click = this.ctx.createBufferSource();
+    click.buffer = this.noiseBuffer;
+    const clickFilter = this.ctx.createBiquadFilter();
+    clickFilter.type = 'highpass';
+    clickFilter.frequency.value = 2000;
+    const clickEnv = this.ctx.createGain();
+    clickEnv.gain.setValueAtTime(0.4, t);
+    clickEnv.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+
+    click.connect(clickFilter);
+    clickFilter.connect(clickEnv);
+    clickEnv.connect(gain);
+
+    osc.start(t);
+    osc.stop(t + 0.18);
+    click.start(t);
+    click.stop(t + 0.05);
+
+    return gain;
+  }
+
+  playVHSStaticBurst(duration = 0.45) {
+    const t = this.ctx.currentTime;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.55, t);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + duration);
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = this.noiseBuffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(3200, t);
+    filter.Q.value = 1.2;
+
+    noise.connect(filter);
+    filter.connect(gain);
+
+    noise.start(t);
+    noise.stop(t + duration);
+    return gain;
+  }
+
+  createOpeningDrone() {
+    const group = {
+      gainNode: this.ctx.createGain(),
+      oscillators: [],
+      sources: []
+    };
+    group.gainNode.gain.setValueAtTime(0.001, this.ctx.currentTime);
+    group.gainNode.gain.linearRampToValueAtTime(0.55, this.ctx.currentTime + 3.0);
+
+    // 1. Low 60Hz Electrical Hum with harmonics
+    const freqs = [60, 120, 180, 240];
+    freqs.forEach((f, i) => {
+      const osc = this.ctx.createOscillator();
+      osc.type = i === 0 ? 'sine' : 'sawtooth';
+      osc.frequency.value = f;
+      const g = this.ctx.createGain();
+      g.gain.value = 0.15 / (i + 1);
+      osc.connect(g);
+      g.connect(group.gainNode);
+      osc.start();
+      group.oscillators.push(osc);
+    });
+
+    // 2. Sub-bass atmospheric drone (38Hz)
+    const subOsc = this.ctx.createOscillator();
+    subOsc.type = 'sine';
+    subOsc.frequency.value = 38;
+    const subG = this.ctx.createGain();
+    subG.gain.value = 0.35;
+    subOsc.connect(subG);
+    subG.connect(group.gainNode);
+    subOsc.start();
+    group.oscillators.push(subOsc);
+
+    // 3. Continuous tape hiss
+    const hiss = this.ctx.createBufferSource();
+    hiss.buffer = this.hissBuffer;
+    hiss.loop = true;
+    const hissFilter = this.ctx.createBiquadFilter();
+    hissFilter.type = 'highpass';
+    hissFilter.frequency.value = 1500;
+    const hissGain = this.ctx.createGain();
+    hissGain.gain.value = 0.12;
+
+    hiss.connect(hissFilter);
+    hissFilter.connect(hissGain);
+    hissGain.connect(group.gainNode);
+    hiss.start();
+    group.sources.push(hiss);
+
+    group.stop = (fadeTime = 1.0) => {
+      const now = this.ctx.currentTime;
+      group.gainNode.gain.setValueAtTime(group.gainNode.gain.value, now);
+      group.gainNode.gain.linearRampToValueAtTime(0.001, now + fadeTime);
+      setTimeout(() => {
+        group.oscillators.forEach(o => { try { o.stop(); } catch(e){} });
+        group.sources.forEach(s => { try { s.stop(); } catch(e){} });
+      }, fadeTime * 1000 + 50);
+    };
+
+    return group;
   }
 }

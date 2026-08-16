@@ -1,0 +1,11 @@
+Model Information:
+* title:	Various Low-Poly Street Lights
+* source:	https://sketchfab.com/3d-models/various-low-poly-street-lights-1173b0c4d9b0400bbeaafbee0e94ca59
+* author:	KMB3D (https://sketchfab.com/kmb_jr)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Various Low-Poly Street Lights" (https://sketchfab.com/3d-models/various-low-poly-street-lights-1173b0c4d9b0400bbeaafbee0e94ca59) by KMB3D (https://sketchfab.com/kmb_jr) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

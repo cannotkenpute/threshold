@@ -7,6 +7,7 @@ export const RetroShader = {
   uniforms: {
     tDiffuse: { value: null },
     resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+    rtResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
     time: { value: 0.0 },
     ditherScale: { value: 1.0 },
     colorDepth: { value: 12.0 },
@@ -27,6 +28,7 @@ export const RetroShader = {
   fragmentShader: `
     uniform sampler2D tDiffuse;
     uniform vec2 resolution;
+    uniform vec2 rtResolution;
     uniform float time;
     uniform float ditherScale;
     uniform float colorDepth;
@@ -95,16 +97,19 @@ export const RetroShader = {
       float b = texture2D(tDiffuse, uv - vec2(split, 0.0)).b;
       vec3 color = vec3(r, g, b);
 
-      // Bayer Dithering
-      vec2 screenPos = gl_FragCoord.xy / ditherScale;
+      // Bayer Dithering -- aligned to low-res render-target pixels, so the dither
+      // pattern scales with the render-scale setting instead of shimmering at
+      // screen-pixel density.
+      vec2 screenPos = floor(uv * rtResolution) / ditherScale;
       float dither = bayer4x4(screenPos) - 0.5;
       color += dither * (1.0 / colorDepth);
 
       // Color Quantization (1980s Retro limited palette)
       color = floor(color * colorDepth + 0.5) / colorDepth;
 
-      // Scanline Effect
-      float scanline = sin(uv.y * resolution.y * 0.9) * 0.5 + 0.5;
+      // Scanline Effect -- one dark line per low-res pixel row (~480 visible lines at
+      // the default scale, right in period CRT territory)
+      float scanline = sin(uv.y * rtResolution.y * 0.9) * 0.5 + 0.5;
       color -= scanline * scanlineIntensity;
 
       // Film Grain

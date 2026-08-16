@@ -1,0 +1,53 @@
+================================================================================
+SUPERVISOR VAUGHN - OPENING CINEMATIC RECORDING SCRIPT
+================================================================================
+
+Target Folder: assets/audio/
+Format: .mp3 (Mono/Stereo, 44.1kHz)
+
+--------------------------------------------------------------------------------
+FILE: v1.mp3
+SCENE: Document 02 (Internal Memorandum)
+LINE: "Your assignment is straightforward—"
+TONE: Calm, professional briefing tone; cuts off right before the next thought.
+--------------------------------------------------------------------------------
+FILE: v2.mp3
+SCENE: Document 03 (Expedition 04 Overdue)
+LINE: "—we lost contact at 02:17—"
+TONE: Serious, cold, factual.
+--------------------------------------------------------------------------------
+FILE: v3.mp3
+SCENE: Document 03 (Expedition 04 Overdue)
+LINE: "Do not deviate from the marked route."
+TONE: Stern, authoritative warning.
+--------------------------------------------------------------------------------
+FILE: v4.mp3
+SCENE: Document 04 (Tether Safety Bulletin)
+LINE: "The tether is your only way back."
+TONE: Urgent, emphatic safety directive.
+--------------------------------------------------------------------------------
+FILE: v5.mp3
+SCENE: Document 04 (Tether Safety Bulletin)
+LINE: "—you are not authorized to investigate—"
+TONE: Sharp, commanding bureaucratic rebuke.
+--------------------------------------------------------------------------------
+FILE: v6.mp3
+SCENE: Montage Climax (Accelerating Chorus)
+LINE: "If you encounter anything unusual—"
+TONE: Rising tension, cautionary.
+--------------------------------------------------------------------------------
+FILE: v7.mp3
+SCENE: Montage Climax (Accelerating Chorus)
+LINE: "—come back immediately."
+TONE: Decisive, urgent order.
+--------------------------------------------------------------------------------
+FILE: v8.mp3
+SCENE: Final Authorization (Blackout Transmission)
+LINE: "Proceed."
+TONE: Perfectly clear, cold, dry, isolated command.
+--------------------------------------------------------------------------------
+FILE: v9.mp3
+SCENE: Level 1 Gateway Dispatch (Optional / Start of Gameplay)
+LINE: "Supervisor: Vaughn here. Tether is secured to the gateway frame. Enter DTE-04, locate Mercer's team, and return."
+TONE: Standard official radio dispatch.
+================================================================================

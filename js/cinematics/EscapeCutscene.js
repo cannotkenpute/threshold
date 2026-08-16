@@ -180,7 +180,7 @@ export class EscapeCutscene {
     }
     this.roadSegments = [];
 
-    // Road Material with dark asphalt & dashed yellow center line
+    // Four-lane freeway material
     const roadCanvas = document.createElement('canvas');
     roadCanvas.width = 512;
     roadCanvas.height = 512;
@@ -196,12 +196,15 @@ export class EscapeCutscene {
       ctx.fillRect(Math.random() * 512, Math.random() * 512, 2, 2);
     }
 
-    // Double dashed yellow lines in the middle
+    // White dashed lane dividers and yellow median borders
+    ctx.fillStyle = '#d5dbdc';
+    ctx.fillRect(132, 40, 6, 180);
+    ctx.fillRect(132, 300, 6, 180);
+    ctx.fillRect(375, 40, 6, 180);
+    ctx.fillRect(375, 300, 6, 180);
     ctx.fillStyle = '#e6b800';
-    ctx.fillRect(248, 40, 6, 180);
-    ctx.fillRect(248, 300, 6, 180);
-    ctx.fillRect(258, 40, 6, 180);
-    ctx.fillRect(258, 300, 6, 180);
+    ctx.fillRect(239, 0, 6, 512);
+    ctx.fillRect(267, 0, 6, 512);
 
     // White solid side shoulder lines
     ctx.fillStyle = '#cfd6d8';
@@ -221,7 +224,8 @@ export class EscapeCutscene {
 
     // Spawn 10 chained modular highway road slabs
     const segmentLength = 80.0;
-    const roadWidth = 18.0;
+    const roadWidth = 24.0;
+    const sandMat = new THREE.MeshStandardMaterial({ color: 0x765a36, roughness: 1.0 });
 
     for (let i = 0; i < 12; i++) {
       const segMesh = new THREE.Mesh(
@@ -233,6 +237,13 @@ export class EscapeCutscene {
       segMesh.receiveShadow = true;
       this.highwayGroup.add(segMesh);
       this.roadSegments.push(segMesh);
+
+      const leftDesert = new THREE.Mesh(new THREE.PlaneGeometry(40, segmentLength), sandMat);
+      leftDesert.rotation.x = -Math.PI / 2;
+      leftDesert.position.set(-32, -0.03, -i * segmentLength);
+      const rightDesert = leftDesert.clone();
+      rightDesert.position.x = 32;
+      this.highwayGroup.add(leftDesert, rightDesert);
 
       // Guard rails
       const railMat = new THREE.MeshStandardMaterial({ color: 0x4a555a, metalness: 0.8, roughness: 0.4 });
@@ -249,11 +260,12 @@ export class EscapeCutscene {
         pole.position.set(-roadWidth / 2 - 2.5, 4.5, -i * segmentLength);
         this.highwayGroup.add(pole);
 
-        // Distant forest silhouette trees
-        const treeMat = new THREE.MeshBasicMaterial({ color: 0x060c08 });
-        const tree = new THREE.Mesh(new THREE.ConeGeometry(3.5, 12, 6), treeMat);
-        tree.position.set(roadWidth / 2 + 8.0 + Math.sin(i) * 3, 6, -i * segmentLength);
-        this.highwayGroup.add(tree);
+        // Distant desert rock silhouette
+        const rockMat = new THREE.MeshBasicMaterial({ color: 0x201911 });
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(3.4, 0), rockMat);
+        rock.scale.set(1.8, 0.7, 1.2);
+        rock.position.set(roadWidth / 2 + 10.0 + Math.sin(i) * 3, 1.5, -i * segmentLength);
+        this.highwayGroup.add(rock);
       }
     }
 
@@ -437,16 +449,16 @@ export class EscapeCutscene {
     if (this.carGroup) this.scene.remove(this.carGroup);
     if (this.highwayGroup) this.scene.remove(this.highwayGroup);
 
-    // Sync player position & switch to Level 3 (The Dark Highway)
+    // Sync player position & switch to Level 3 in the left freeway lane.
     if (this.levelBuilder) {
-      this.levelBuilder.switchLevel(3, new THREE.Vector3(0, 1.65, 0));
+      this.levelBuilder.switchLevel(3, new THREE.Vector3(-3.2, 1.65, 0));
     }
     if (this.audio) {
       this.audio.switchLevelAmbience(3);
     }
     if (this.player) {
-      this.player.position.set(0, 1.65, 0);
-      this.player.camera.position.set(0, 1.65, 0);
+      this.player.position.set(-3.2, 1.65, 0);
+      this.player.camera.position.set(-3.2, 1.65, 0);
       this.player.velocity.set(0, 0, 0);
       this.player.isFlashlightOn = true;
       this.player.batteryLevel = 100;
@@ -459,8 +471,8 @@ export class EscapeCutscene {
     }
 
     this.state.setMode(GAME_MODES.GAMEPLAY);
-    this.hud.showSplashBanner("ESCAPED THE COMPLEX", "LEVEL 3: THE DARK HIGHWAY // NO EXIT DETECTED", 8000);
-    this.hud.updateObjective("OBJECTIVE: FOLLOW THE HIGHWAY NORTH");
-    this.dialogue.showSubtitle("Cold night air hits your face. The highway stretches on forever into the dark.", "mercer", 6000);
+    this.hud.showSplashBanner("ESCAPED THE COMPLEX", "LEVEL 3: THE DESERT FREEWAY // NO EXIT DETECTED", 8000);
+    this.hud.updateObjective("OBJECTIVE: FOLLOW THE FREEWAY NORTH");
+    this.dialogue.showSubtitle("Cold desert air hits your face. The freeway stretches forever across the dark sand.", "mercer", 6000);
   }
 }

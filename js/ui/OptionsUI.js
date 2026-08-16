@@ -34,7 +34,14 @@ export class OptionsUI {
     this.curvatureSlider = document.getElementById('opt-curvature');
     this.curvatureVal = document.getElementById('opt-curvature-val');
 
+    this.renderScaleSlider = document.getElementById('opt-render-scale');
+    this.renderScaleVal = document.getElementById('opt-render-scale-val');
+
     this.resumeBtn = document.getElementById('btn-options-resume');
+
+    // Options shown from the title screen (before gameplay / pointer lock)
+    this.titleMode = false;
+    this.footerHintEl = document.querySelector('.options-footer-hint');
 
     this.initEvents();
     this.initDevTeleport();
@@ -56,8 +63,9 @@ export class OptionsUI {
       lvl2_escape_car: { level: 2, x: 16.0, y: 1.65, z: 2.0, label: "Level 2: Escape Vehicle (Locked Car)" },
       lvl2_sedans: { level: 2, x: 24.0, y: 1.65, z: 24.0, label: "Level 2: Abandoned Cars Row" },
       lvl2_deep: { level: 2, x: -48.0, y: 1.65, z: -48.0, label: "Level 2: Deep Garage Sector" },
-      lvl3_highway: { level: 3, x: 0.0, y: 1.65, z: 0.0, label: "Level 3: The Dark Highway" },
-      lvl3_police: { level: 3, x: -6.0, y: 1.65, z: -72.0, label: "Level 3: Abandoned Patrol Car" }
+      lvl3_highway: { level: 3, x: -3.2, y: 1.65, z: 0.0, yaw: 0, label: "Level 3: Infinite Desert Freeway" },
+      lvl3_police: { level: 3, x: -6.0, y: 1.65, z: -72.0, label: "Level 3: Abandoned Patrol Car" },
+      lvl3_gas_station: { level: 3, x: 18.0, y: 1.65, z: -715.0, yaw: -Math.PI / 2, label: "Level 3: Roadside Gas Station" }
     };
 
     const devButtons = document.querySelectorAll('.dev-btn');
@@ -76,7 +84,7 @@ export class OptionsUI {
   teleportPlayer(x, y, z, targetLevel = 1, yaw = null) {
     if (!this.player) return;
 
-    // Check if switching between Level 1 and Level 2
+    // Switch the streamed world when teleporting between levels.
     if (this.levelBuilder && this.levelBuilder.currentLevel !== targetLevel) {
       this.levelBuilder.switchLevel(targetLevel, new THREE.Vector3(x, y, z));
       if (this.audioManager) {
@@ -95,6 +103,24 @@ export class OptionsUI {
     // Force chunk generator update around teleported destination
     if (this.levelBuilder) {
       this.levelBuilder.update(this.player.position, true);
+    }
+
+    // Apply a visible moonlit baseline immediately when entering Level 3.
+    if (targetLevel === 3 && this.renderer) {
+      if (this.renderer.ambientLight) {
+        this.renderer.ambientLight.color.setHex(0x607898);
+        this.renderer.ambientLight.intensity = 0.52;
+      }
+      if (this.renderer.sunLight) {
+        this.renderer.sunLight.color.setHex(0x718db5);
+        this.renderer.sunLight.intensity = 0.45;
+        this.renderer.sunLight.visible = true;
+      }
+      if (this.renderer.scene) {
+        this.renderer.scene.background.setHex(0x172233);
+        this.renderer.scene.fog.color.setHex(0x131d2b);
+        this.renderer.scene.fog.density = 0.009;
+      }
     }
 
     // Ensure flashlight works and is illuminated on dark highway
@@ -211,6 +237,18 @@ export class OptionsUI {
         }
       });
     }
+
+    // Render Scale (low-res retro target). Live-adjustable; the CRT/scanline/dither
+    // effects re-align to the new render-target resolution automatically.
+    if (this.renderScaleSlider) {
+      this.renderScaleSlider.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value);
+        if (this.renderScaleVal) this.renderScaleVal.textContent = `${val}%`;
+        if (this.renderer && this.renderer.setRenderScale) {
+          this.renderer.setRenderScale(val / 100);
+        }
+      });
+    }
   }
 
   toggle() {
@@ -224,8 +262,23 @@ export class OptionsUI {
   open() {
     if (!this.modal) return;
     this.isOpen = true;
+    this.titleMode = false;
     this.modal.style.display = 'flex';
     this.inputManager.exitLock();
+    if (this.audioManager) {
+      this.audioManager.playUI('click');
+    }
+  }
+
+  // Open the options from the title screen: no pointer lock exists yet,
+  // and the action button acts as "BACK" rather than "resume mission".
+  openTitle() {
+    if (!this.modal) return;
+    this.isOpen = true;
+    this.titleMode = true;
+    this.modal.style.display = 'flex';
+    if (this.resumeBtn) this.resumeBtn.textContent = 'BACK';
+    if (this.footerHintEl) this.footerHintEl.textContent = 'PRESS [ESC] TO CLOSE SETTINGS & RETURN TO TITLE';
     if (this.audioManager) {
       this.audioManager.playUI('click');
     }
@@ -235,7 +288,14 @@ export class OptionsUI {
     if (!this.modal) return;
     this.isOpen = false;
     this.modal.style.display = 'none';
-    this.inputManager.requestLock();
+    if (this.titleMode) {
+      // Restore gameplay-mode labels and do not touch pointer lock on the title screen
+      this.titleMode = false;
+      if (this.resumeBtn) this.resumeBtn.textContent = 'RESUME MISSION [T / ESC]';
+      if (this.footerHintEl) this.footerHintEl.textContent = 'PRESS [T] OR [ESC] TO CLOSE SETTINGS & RETURN TO GAMEPLAY';
+    } else {
+      this.inputManager.requestLock();
+    }
     if (this.audioManager) {
       this.audioManager.playUI('click');
     }

@@ -10,7 +10,8 @@ export const GAME_MODES = {
   GAMEPLAY: 'GAMEPLAY',
   CUTSCENE: 'CUTSCENE',
   PAUSED: 'PAUSED',
-  LEVEL_COMPLETE: 'LEVEL_COMPLETE'
+  LEVEL_COMPLETE: 'LEVEL_COMPLETE',
+  SURVIVAL: 'SURVIVAL'
 };
 
 export class StateManager {
@@ -38,7 +39,7 @@ export class StateManager {
     this.mode = newMode;
     const uiRoot = document.getElementById('ui-root');
     if (uiRoot) {
-      uiRoot.style.display = (newMode === GAME_MODES.GAMEPLAY) ? 'block' : 'none';
+      uiRoot.style.display = (newMode === GAME_MODES.GAMEPLAY || newMode === GAME_MODES.SURVIVAL) ? 'block' : 'none';
     }
   }
 

@@ -6,6 +6,10 @@ export class HUDManager {
   constructor() {
     this.crosshair = document.getElementById('crosshair');
     this.interactPrompt = document.getElementById('interact-prompt');
+    this.vitalsContainer = document.querySelector('.retro-vitals-container');
+    this.healthPercentText = document.getElementById('health-percent-text');
+    this.healthSegments = document.querySelectorAll('#health-segments .h-seg');
+    this.ecgIcon = document.querySelector('.ecg-icon');
     this.batterySegments = document.querySelectorAll('#battery-segments .seg');
     this.batteryContainer = document.getElementById('battery-segments');
     this.batteryPercentText = document.getElementById('battery-percent-text');
@@ -15,11 +19,76 @@ export class HUDManager {
     this.quickSlots = document.querySelectorAll('.slot-box');
     this.gridStatusText = document.getElementById('grid-status-text');
     this.gridTimerText = document.getElementById('grid-timer-text');
+    this.fpsValueText = document.getElementById('fps-value-text');
+    this.fpsWidget = document.getElementById('fps-counter-widget');
+    this.fpsFrameCount = 0;
+    this.fpsLastTime = performance.now();
+    this.currentFps = 60;
+
+    // Survival Mode: Hunger / Thirst vitals (hidden container unless Survival is active)
+    this.survivalVitalsContainer = document.getElementById('survival-vitals-container');
+    this.hungerSegments = document.querySelectorAll('#hunger-segments .seg');
+    this.hungerContainer = document.getElementById('hunger-segments');
+    this.hungerPercentText = document.getElementById('hunger-percent-text');
+    this.thirstSegments = document.querySelectorAll('#thirst-segments .seg');
+    this.thirstContainer = document.getElementById('thirst-segments');
+    this.thirstPercentText = document.getElementById('thirst-percent-text');
+    this.drawCallsText = document.getElementById('draw-calls-text');
+    this.triCountText = document.getElementById('tri-count-text');
+
+    // Memoized-write bookkeeping: the HUD refresh is throttled to 10Hz, and these caches
+    // additionally skip the remaining string/className writes when nothing visibly changed.
+    // Rebuilding ~20 DOM strings every call was a steady main-thread style-recalc cost.
+    this._lastHealth = -1;
+    this._lastBattery = -1;
+    this._lastStaminaPct = -1;
+    this._lastPhase = '';
+    this._lastGridTimer = '';
+    this._lastPromptText = null;
+    this._lastPromptVisible = null;
+    this._lastSurvivalHunger = -1;
+    this._lastSurvivalThirst = -1;
+  }
+
+  updateFPS() {
+    this.fpsFrameCount++;
+    const now = performance.now();
+    const elapsed = now - this.fpsLastTime;
+    if (elapsed >= 250) {
+      this.currentFps = Math.round((this.fpsFrameCount * 1000) / elapsed);
+      this.fpsFrameCount = 0;
+      this.fpsLastTime = now;
+
+      if (this.fpsValueText) {
+        this.fpsValueText.textContent = this.currentFps;
+      }
+      if (this.fpsWidget) {
+        if (this.currentFps >= 50) {
+          this.fpsWidget.className = 'fps-counter-widget fps-good';
+        } else if (this.currentFps >= 30) {
+          this.fpsWidget.className = 'fps-counter-widget fps-warning';
+        } else {
+          this.fpsWidget.className = 'fps-counter-widget fps-critical';
+        }
+      }
+
+      // Draw calls are the usual ceiling on a scene built from many small meshes; showing them
+      // next to FPS makes it obvious whether a slowdown is submission-bound or something else.
+      const r = window.gameRenderer && window.gameRenderer.renderer;
+      if (r && r.info) {
+        if (this.drawCallsText) this.drawCallsText.textContent = r.info.render.calls;
+        if (this.triCountText) {
+          const tris = r.info.render.triangles;
+          this.triCountText.textContent = tris > 1000 ? `${Math.round(tris / 1000)}k` : tris;
+        }
+      }
+    }
   }
 
   updatePowerGrid(cycleInfo) {
     if (!cycleInfo) return;
-    if (this.gridStatusText) {
+    if (this.gridStatusText && cycleInfo.phase !== this._lastPhase) {
+      this._lastPhase = cycleInfo.phase;
       this.gridStatusText.className = `grid-status ${cycleInfo.phase.toLowerCase()}`;
       if (cycleInfo.phase === 'DAY') {
         this.gridStatusText.textContent = 'ACTIVE [DAY]';
@@ -36,50 +105,169 @@ export class HUDManager {
       const remaining = Math.max(0, Math.floor(cycleInfo.totalDuration - cycleInfo.cycleTime));
       const mins = Math.floor(remaining / 60).toString().padStart(2, '0');
       const secs = (remaining % 60).toString().padStart(2, '0');
-      this.gridTimerText.textContent = `${mins}:${secs}`;
+      const timerText = `${mins}:${secs}`;
+      if (timerText !== this._lastGridTimer) {
+        this._lastGridTimer = timerText;
+        this.gridTimerText.textContent = timerText;
+      }
     }
   }
 
-  updateVitals(battery, stamina, sanity) {
+  updateVitals(battery, stamina, sanity, health = 100) {
+    const clampedHealth = Math.max(0, Math.min(100, Math.round(health)));
     const clampedBattery = Math.max(0, Math.min(100, Math.round(battery)));
+    const staminaPct = Math.max(0, Math.min(100, Math.round(stamina)));
 
-    // Update Numerical Percentage
-    if (this.batteryPercentText) {
-      this.batteryPercentText.textContent = `${clampedBattery}%`;
-      if (clampedBattery < 20) {
-        this.batteryPercentText.className = 'battery-percent low';
-      } else {
-        this.batteryPercentText.className = 'battery-percent';
+    // 1. Update Retro Biometric Health / Vitals (only when the rounded value changed)
+    if (clampedHealth !== this._lastHealth) {
+      this._lastHealth = clampedHealth;
+
+      if (this.healthPercentText) {
+        this.healthPercentText.textContent = `${clampedHealth}%`;
+        if (clampedHealth <= 25) {
+          this.healthPercentText.className = 'health-percent critical';
+        } else if (clampedHealth <= 55) {
+          this.healthPercentText.className = 'health-percent warning';
+        } else {
+          this.healthPercentText.className = 'health-percent nominal';
+        }
+      }
+
+      if (this.healthSegments && this.healthSegments.length > 0) {
+        // 10 Segments: each represents 10% health
+        const activeSegs = Math.ceil(clampedHealth / 10);
+        this.healthSegments.forEach((seg, idx) => {
+          seg.className = 'h-seg';
+          if (idx < activeSegs) {
+            if (clampedHealth <= 25) {
+              seg.classList.add('danger');
+            } else if (clampedHealth <= 55) {
+              seg.classList.add('warning');
+            } else {
+              seg.classList.add('active');
+            }
+          }
+        });
+
+        if (this.vitalsContainer) {
+          if (clampedHealth <= 25) {
+            this.vitalsContainer.className = 'analog-meter-container retro-vitals-container critical';
+          } else if (clampedHealth <= 55) {
+            this.vitalsContainer.className = 'analog-meter-container retro-vitals-container warning';
+          } else {
+            this.vitalsContainer.className = 'analog-meter-container retro-vitals-container';
+          }
+        }
       }
     }
 
-    // Update 4-Segment Retro Battery Cells
-    if (this.batterySegments && this.batterySegments.length > 0) {
-      const activeSegs = Math.ceil(clampedBattery / 25);
-      this.batterySegments.forEach((seg, idx) => {
+    // 2. Update Numerical Battery Percentage + 4-Segment Retro Battery Cells
+    if (clampedBattery !== this._lastBattery) {
+      this._lastBattery = clampedBattery;
+
+      if (this.batteryPercentText) {
+        this.batteryPercentText.textContent = `${clampedBattery}%`;
+        if (clampedBattery < 20) {
+          this.batteryPercentText.className = 'battery-percent low';
+        } else {
+          this.batteryPercentText.className = 'battery-percent';
+        }
+      }
+
+      if (this.batterySegments && this.batterySegments.length > 0) {
+        const activeSegs = Math.ceil(clampedBattery / 25);
+        this.batterySegments.forEach((seg, idx) => {
+          seg.className = 'seg';
+          if (idx < activeSegs) {
+            if (clampedBattery <= 20) {
+              seg.classList.add('danger');
+            } else if (clampedBattery <= 45) {
+              seg.classList.add('warning');
+            } else {
+              seg.classList.add('active');
+            }
+          }
+        });
+
+        if (this.batteryContainer) {
+          if (clampedBattery <= 20) {
+            this.batteryContainer.classList.add('low');
+          } else {
+            this.batteryContainer.classList.remove('low');
+          }
+        }
+      }
+    }
+
+    // 3. Update Exertion Stamina Bar
+    if (staminaPct !== this._lastStaminaPct) {
+      this._lastStaminaPct = staminaPct;
+      if (this.staminaBar) {
+        this.staminaBar.style.width = `${staminaPct}%`;
+      }
+    }
+  }
+
+  updateSurvivalVitals(hunger, thirst) {
+    const clampedHunger = Math.max(0, Math.min(100, Math.round(hunger)));
+    const clampedThirst = Math.max(0, Math.min(100, Math.round(thirst)));
+
+    if (clampedHunger === this._lastSurvivalHunger && clampedThirst === this._lastSurvivalThirst) return;
+    this._lastSurvivalHunger = clampedHunger;
+    this._lastSurvivalThirst = clampedThirst;
+
+    if (this.hungerPercentText) {
+      this.hungerPercentText.textContent = `${clampedHunger}%`;
+      this.hungerPercentText.className = clampedHunger < 20 ? 'battery-percent low' : 'battery-percent';
+    }
+    if (this.hungerSegments && this.hungerSegments.length > 0) {
+      const activeSegs = Math.ceil(clampedHunger / 25);
+      this.hungerSegments.forEach((seg, idx) => {
         seg.className = 'seg';
         if (idx < activeSegs) {
-          if (clampedBattery <= 20) {
+          if (clampedHunger <= 20) {
             seg.classList.add('danger');
-          } else if (clampedBattery <= 45) {
+          } else if (clampedHunger <= 45) {
             seg.classList.add('warning');
           } else {
             seg.classList.add('active');
           }
         }
       });
-
-      if (this.batteryContainer) {
-        if (clampedBattery <= 20) {
-          this.batteryContainer.classList.add('low');
+      if (this.hungerContainer) {
+        if (clampedHunger <= 20) {
+          this.hungerContainer.classList.add('low');
         } else {
-          this.batteryContainer.classList.remove('low');
+          this.hungerContainer.classList.remove('low');
         }
       }
     }
 
-    if (this.staminaBar) {
-      this.staminaBar.style.width = `${Math.max(0, Math.min(100, stamina))}%`;
+    if (this.thirstPercentText) {
+      this.thirstPercentText.textContent = `${clampedThirst}%`;
+      this.thirstPercentText.className = clampedThirst < 20 ? 'battery-percent low' : 'battery-percent';
+    }
+    if (this.thirstSegments && this.thirstSegments.length > 0) {
+      const activeSegs = Math.ceil(clampedThirst / 25);
+      this.thirstSegments.forEach((seg, idx) => {
+        seg.className = 'seg';
+        if (idx < activeSegs) {
+          if (clampedThirst <= 20) {
+            seg.classList.add('danger');
+          } else if (clampedThirst <= 45) {
+            seg.classList.add('warning');
+          } else {
+            seg.classList.add('active');
+          }
+        }
+      });
+      if (this.thirstContainer) {
+        if (clampedThirst <= 20) {
+          this.thirstContainer.classList.add('low');
+        } else {
+          this.thirstContainer.classList.remove('low');
+        }
+      }
     }
   }
 
@@ -98,11 +286,17 @@ export class HUDManager {
   }
 
   updateInteractivePrompt(focusedObject) {
+    const promptText = focusedObject ? `[E] ${focusedObject.name}` : null;
+    const visible = !!focusedObject;
+    if (promptText === this._lastPromptText && visible === this._lastPromptVisible) return;
+    this._lastPromptText = promptText;
+    this._lastPromptVisible = visible;
+
     if (focusedObject) {
       if (this.crosshair) this.crosshair.classList.add('interactive');
       if (this.interactPrompt) {
         this.interactPrompt.style.display = 'block';
-        this.interactPrompt.textContent = `[E] ${focusedObject.name}`;
+        this.interactPrompt.textContent = promptText;
       }
     } else {
       if (this.crosshair) this.crosshair.classList.remove('interactive');
@@ -151,6 +345,8 @@ export class HUDManager {
           : item.id === 'gas_can' ? '⛽'
           : item.id === 'crow_bar' ? '🔧'
           : item.id === 'security_keycard' ? '▣'
+          : item.id === 'ration_pack' ? '🥫'
+          : item.id === 'canteen_water' ? '🧴'
           : '🩹';
         if (iconEl) iconEl.textContent = icon;
         if (countEl) countEl.textContent = item.count > 1 ? `x${item.count}` : '';

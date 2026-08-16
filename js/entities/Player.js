@@ -24,10 +24,16 @@ export class Player {
     this.isSprinting = false;
 
     // Vitals
+    this.health = CONFIG.PLAYER.MAX_HEALTH;
+    this.maxHealth = CONFIG.PLAYER.MAX_HEALTH;
     this.stamina = CONFIG.PLAYER.MAX_STAMINA;
     this.sanity = CONFIG.PLAYER.MAX_SANITY;
     this.batteryLevel = CONFIG.FLASHLIGHT.MAX_BATTERY;
     this.isFlashlightOn = false;
+
+    // Survival Mode: when true, permadeath applies (no emergency revival on handleDeath()).
+    // Set by main.js when Survival Mode launches; SurvivalState composes with this player.
+    this.isSurvivalMode = false;
 
     // Flashlight SpotLight (Attached to camera)
     this.flashlight = new THREE.SpotLight(
@@ -64,9 +70,35 @@ export class Player {
     this.stepCount = 0; // Steps taken since entering the anomaly
     this.hasCrossedPortal = false;
 
+    // Fixed-timestep bookkeeping
+    this._lastIsMoving = false;
+    this._raycastFrame = 0;
+
     // Interactive targeting
     this.raycaster = new THREE.Raycaster();
     this.focusedInteractive = null;
+
+    // Scratch objects reused every frame in update()/handleCollision()/updateInteractionRaycast()
+    // to avoid per-frame allocation churn in the player's hot path.
+    this._scratchMoveDir = new THREE.Vector3();
+    this._scratchUpAxis = new THREE.Vector3(0, 1, 0);
+    this._scratchNextPos = new THREE.Vector3();
+    this._scratchVelocityStep = new THREE.Vector3();
+    this._scratchBoxXMin = new THREE.Vector3();
+    this._scratchBoxXMax = new THREE.Vector3();
+    this._scratchBoxZMin = new THREE.Vector3();
+    this._scratchBoxZMax = new THREE.Vector3();
+    this._scratchBoxX = new THREE.Box3(this._scratchBoxXMin, this._scratchBoxXMax);
+    this._scratchBoxZ = new THREE.Box3(this._scratchBoxZMin, this._scratchBoxZMax);
+    this._scratchScreenCenter = new THREE.Vector2(0, 0);
+
+    // Cache of levelBuilder.interactiveObjects mapped to meshes; rebuilt when the source
+    // array's identity or version changes (adds/removes during chunk load/unload and item
+    // pickup). The version counter catches remove+add pairs that keep the length identical,
+    // which a pure length check would miss.
+    this._cachedInteractiveObjectsRef = null;
+    this._cachedInteractiveVersion = -1;
+    this._cachedInteractiveMeshes = [];
   }
 
   createFirstPersonFlashlightModel() {
@@ -337,7 +369,11 @@ export class Player {
     }
   }
 
-  update(delta, input) {
+  // Per-frame visual/input update: mouse & arrow-key look (zero added latency -- raw
+  // deltas consumed exactly once per rendered frame), interaction raycast (throttled),
+  // and the held-flashlight hand sway. All movement/vitals simulation lives in
+  // physicsStep(), driven at a fixed rate by the game loop's accumulator.
+  updateLook(delta, input) {
     // 1. Mouse & Arrow Keys Look
     const mouse = input.consumeMouseDelta();
     let lookYaw = mouse.x * input.mouseSensitivity;
@@ -355,7 +391,32 @@ export class Player {
     this.rotation.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.rotation.x));
     this.camera.rotation.copy(this.rotation);
 
-    // 2. Movement & Speed determination
+    // 2. Interaction focus raycast, every 3rd frame (~20Hz at 60fps) -- imperceptible
+    // at the 3.2m pickup range but skips a recursive raycast against every interactive
+    // mesh in the streamed area on 2 of every 3 frames.
+    this._raycastFrame = (this._raycastFrame + 1) % CONFIG.PERF.RAYCAST_EVERY_N_FRAMES;
+    if (this._raycastFrame === 0) {
+      this.updateInteractionRaycast();
+    }
+
+    // 3. Dynamic first-person flashlight hand sway (visual only)
+    if (this.flashlightModel) {
+      const isMoving = this._lastIsMoving;
+      const swayX = Math.cos(this.bobTimer * 0.5) * (isMoving ? 0.008 : 0.001);
+      const swayY = Math.sin(this.bobTimer) * (isMoving ? 0.012 : 0.002);
+      this.flashlightModel.position.set(
+        this.flashlightBasePos.x + swayX,
+        this.flashlightBasePos.y + swayY,
+        this.flashlightBasePos.z
+      );
+    }
+  }
+
+  // Fixed-timestep simulation step (h = 1/120s by default). Identical movement,
+  // footstep cadence and vitals behaviour at any display frame rate -- no more
+  // frame-rate-dependent glide or collision tunneling on slow frames.
+  physicsStep(h, input) {
+    // 1. Movement & Speed determination
     this.isCrouching = input.keys.crouch;
     this.isSprinting = input.keys.sprint && !this.isCrouching && this.stamina > 5;
 
@@ -365,38 +426,49 @@ export class Player {
 
     // Stamina depletion / recovery
     if (this.isSprinting && (input.keys.forward || input.keys.backward || input.keys.left || input.keys.right)) {
-      this.stamina = Math.max(0, this.stamina - CONFIG.PLAYER.STAMINA_DRAIN_SPRINT * delta);
+      this.stamina = Math.max(0, this.stamina - CONFIG.PLAYER.STAMINA_DRAIN_SPRINT * h);
     } else {
-      this.stamina = Math.min(CONFIG.PLAYER.MAX_STAMINA, this.stamina + CONFIG.PLAYER.STAMINA_RECOVERY * delta);
+      this.stamina = Math.min(CONFIG.PLAYER.MAX_STAMINA, this.stamina + CONFIG.PLAYER.STAMINA_RECOVERY * h);
+    }
+
+    // Thresholds (40 sanity, 70 stamina) keep passive regen from masking real danger -- it only
+    // kicks in once the player is genuinely composed and rested, not merely between fear spikes.
+    if (this.health < this.maxHealth && this.sanity > 40 && this.stamina > 70 && !this.isSprinting) {
+      this.health = Math.min(this.maxHealth, this.health + CONFIG.PLAYER.HEALTH_RECOVERY * h);
     }
 
     // Direction calculation relative to camera yaw
-    const moveDir = new THREE.Vector3();
+    const moveDir = this._scratchMoveDir.set(0, 0, 0);
     if (input.keys.forward) moveDir.z -= 1;
     if (input.keys.backward) moveDir.z += 1;
     if (input.keys.left) moveDir.x -= 1;
     if (input.keys.right) moveDir.x += 1;
     moveDir.normalize();
-    moveDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.rotation.y);
+    moveDir.applyAxisAngle(this._scratchUpAxis, this.rotation.y);
 
     const isMoving = moveDir.lengthSq() > 0.01;
+    this._lastIsMoving = isMoving;
 
-    // Acceleration & Friction
+    // Acceleration & exponential friction (frame-rate independent: v *= e^(-DEC*h),
+    // vs the old linear v -= v*DEC*dt which decayed differently at low fps)
     if (isMoving) {
-      this.velocity.x += moveDir.x * targetSpeed * CONFIG.PLAYER.ACCELERATION * delta;
-      this.velocity.z += moveDir.z * targetSpeed * CONFIG.PLAYER.ACCELERATION * delta;
+      this.velocity.x += moveDir.x * targetSpeed * CONFIG.PLAYER.ACCELERATION * h;
+      this.velocity.z += moveDir.z * targetSpeed * CONFIG.PLAYER.ACCELERATION * h;
     }
-    this.velocity.x -= this.velocity.x * CONFIG.PLAYER.DECELERATION * delta;
-    this.velocity.z -= this.velocity.z * CONFIG.PLAYER.DECELERATION * delta;
+    const friction = Math.exp(-CONFIG.PLAYER.DECELERATION * h);
+    this.velocity.x *= friction;
+    this.velocity.z *= friction;
 
-    // 3. Collision handling
-    const nextPos = this.position.clone().add(this.velocity.clone().multiplyScalar(delta));
+    // 2. Collision handling
+    const nextPos = this._scratchNextPos.copy(this.position).add(
+      this._scratchVelocityStep.copy(this.velocity).multiplyScalar(h)
+    );
     this.handleCollision(nextPos);
 
-    // 4. Surface detection & Footstep audio
+    // 3. Surface detection & Footstep audio
     if (isMoving) {
-      this.bobTimer += delta * (this.isSprinting ? 12 : 7.5);
-      this.footstepTimer += delta;
+      this.bobTimer += h * (this.isSprinting ? 12 : 7.5);
+      this.footstepTimer += h;
 
       const stepInterval = this.isSprinting ? 0.32 : (this.isCrouching ? 0.65 : 0.48);
       if (this.footstepTimer >= stepInterval) {
@@ -417,14 +489,14 @@ export class Player {
       this.bobTimer = 0;
     }
 
-    // 5. Head Bobbing
+    // 4. Head Bobbing & camera follow (120Hz -- smoother than the display rate)
     const eyeHeight = this.isCrouching ? CONFIG.PLAYER.EYE_HEIGHT_CROUCH : CONFIG.PLAYER.EYE_HEIGHT_STAND;
     const bobOffset = isMoving ? Math.sin(this.bobTimer) * CONFIG.PLAYER.BOB_AMPLITUDE : 0;
     this.camera.position.set(this.position.x, eyeHeight + bobOffset, this.position.z);
 
-    // 6. Flashlight follow & Battery drain
+    // 5. Flashlight follow & Battery drain
     if (this.isFlashlightOn && this.batteryLevel > 0) {
-      this.batteryLevel = Math.max(0, this.batteryLevel - CONFIG.FLASHLIGHT.DRAIN_RATE * delta);
+      this.batteryLevel = Math.max(0, this.batteryLevel - CONFIG.FLASHLIGHT.DRAIN_RATE * h);
 
       // Low battery flicker & dim
       if (this.batteryLevel < CONFIG.FLASHLIGHT.LOW_BATTERY_THRESHOLD) {
@@ -443,22 +515,8 @@ export class Player {
       this.flashlight.visible = false;
       if (this.fillLight) this.fillLight.visible = false;
       // Darkness drains sanity
-      this.sanity = Math.max(0, this.sanity - CONFIG.PLAYER.SANITY_DRAIN_DARKNESS * delta);
+      this.sanity = Math.max(0, this.sanity - CONFIG.PLAYER.SANITY_DRAIN_DARKNESS * h);
     }
-
-    // Dynamic first-person flashlight hand sway
-    if (this.flashlightModel) {
-      const swayX = Math.cos(this.bobTimer * 0.5) * (isMoving ? 0.008 : 0.001);
-      const swayY = Math.sin(this.bobTimer) * (isMoving ? 0.012 : 0.002);
-      this.flashlightModel.position.set(
-        this.flashlightBasePos.x + swayX,
-        this.flashlightBasePos.y + swayY,
-        this.flashlightBasePos.z
-      );
-    }
-
-    // 7. Raycast for interactive focus
-    this.updateInteractionRaycast();
   }
 
   detectCurrentSurface() {
@@ -483,10 +541,9 @@ export class Player {
   handleCollision(nextPos) {
     const nearbyColliders = this.levelBuilder.getNearbyColliders ? this.levelBuilder.getNearbyColliders(this.position) : this.levelBuilder.colliders;
 
-    const playerBox = new THREE.Box3(
-      new THREE.Vector3(nextPos.x - this.playerRadius, 0.1, this.position.z - this.playerRadius),
-      new THREE.Vector3(nextPos.x + this.playerRadius, 2.5, this.position.z + this.playerRadius)
-    );
+    const playerBox = this._scratchBoxX;
+    this._scratchBoxXMin.set(nextPos.x - this.playerRadius, 0.1, this.position.z - this.playerRadius);
+    this._scratchBoxXMax.set(nextPos.x + this.playerRadius, 2.5, this.position.z + this.playerRadius);
 
     let collideX = false;
     for (let i = 0; i < nearbyColliders.length; i++) {
@@ -497,10 +554,9 @@ export class Player {
     }
     if (!collideX) this.position.x = nextPos.x;
 
-    const playerBoxZ = new THREE.Box3(
-      new THREE.Vector3(this.position.x - this.playerRadius, 0.1, nextPos.z - this.playerRadius),
-      new THREE.Vector3(this.position.x + this.playerRadius, 2.5, nextPos.z + this.playerRadius)
-    );
+    const playerBoxZ = this._scratchBoxZ;
+    this._scratchBoxZMin.set(this.position.x - this.playerRadius, 0.1, nextPos.z - this.playerRadius);
+    this._scratchBoxZMax.set(this.position.x + this.playerRadius, 2.5, nextPos.z + this.playerRadius);
 
     let collideZ = false;
     for (let i = 0; i < nearbyColliders.length; i++) {
@@ -512,19 +568,57 @@ export class Player {
     if (!collideZ) this.position.z = nextPos.z;
   }
 
+  takeDamage(amount) {
+    this.health = Math.max(0, this.health - amount);
+    if (this.health <= 0) {
+      this.handleDeath();
+    }
+  }
+
+  heal(amount) {
+    this.health = Math.min(this.maxHealth, this.health + amount);
+  }
+
+  handleDeath() {
+    if (this.isSurvivalMode) {
+      // Permadeath: no emergency adrenaline resuscitation in Survival Mode.
+      if (this.audioManager) {
+        this.audioManager.triggerBlackoutAudio();
+      }
+      return;
+    }
+    this.health = 35; // Emergency adrenaline resuscitation
+    this.sanity = Math.max(25, this.sanity);
+    if (this.audioManager) {
+      this.audioManager.triggerBlackoutAudio();
+    }
+  }
+
   updateInteractionRaycast() {
-    this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
+    this.raycaster.setFromCamera(this._scratchScreenCenter, this.camera);
     this.raycaster.far = 3.2;
 
-    const meshes = this.levelBuilder.interactiveObjects.map(o => o.mesh);
+    // Only remap interactiveObjects -> meshes when the source array's identity or version
+    // has changed (LevelBuilder adds/removes entries on chunk load/unload and pickups)
+    // rather than every frame.
+    const interactiveObjects = this.levelBuilder.interactiveObjects;
+    const version = this.levelBuilder.interactiveVersion || 0;
+    if (interactiveObjects !== this._cachedInteractiveObjectsRef || version !== this._cachedInteractiveVersion) {
+      this._cachedInteractiveMeshes = interactiveObjects.map(o => o.mesh);
+      this._cachedInteractiveObjectsRef = interactiveObjects;
+      this._cachedInteractiveVersion = version;
+    }
+    const meshes = this._cachedInteractiveMeshes;
     const intersects = this.raycaster.intersectObjects(meshes, true);
 
     if (intersects.length > 0) {
       let hitMesh = intersects[0].object;
       let found = null;
-      while (hitMesh && !found) {
+      let depth = 0;
+      while (hitMesh && !found && depth < 10) {
         found = this.levelBuilder.interactiveObjects.find(o => o.mesh === hitMesh);
         hitMesh = hitMesh.parent;
+        depth++;
       }
       this.focusedInteractive = found || null;
     } else {

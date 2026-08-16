@@ -12,6 +12,7 @@ export class CassettePlayer {
     this.onPlaybackEnd = null;
     this.speechUtterance = null;
     this.hissSource = null;
+    this.tapeModulators = [];
     this.vuInterval = null;
   }
 
@@ -24,7 +25,7 @@ export class CassettePlayer {
     // Start tape hiss & mechanical click
     if (this.audioManager.synth) {
       this.audioManager.playUI('tape');
-      this.startTapeHiss();
+      this.startTapeHiss(tapeData.degradedTape ? 0.24 : 0.12);
     }
 
     // 1. If tape has an actual recorded voiceover audio file (e.g. log1dialogue.mp3)
@@ -43,9 +44,28 @@ export class CassettePlayer {
         source.buffer = audioBuffer;
 
         // Route through 1980s microcassette filter chain (360Hz-3600Hz + midrange boost)
-        const cassetteChain = this.audioManager.synth.createCassetteVoiceChain();
+        const cassetteChain = this.audioManager.synth.createCassetteVoiceChain({
+          degraded: tapeData.degradedTape === true
+        });
         source.connect(cassetteChain.input);
         cassetteChain.output.connect(this.audioManager.buses.CASSETTE);
+
+        if (tapeData.degradedTape) {
+          source.playbackRate.value = 0.985;
+          [
+            { frequency: 0.62, depth: 0.018 },
+            { frequency: 5.4, depth: 0.0035 }
+          ].forEach(({ frequency, depth }) => {
+            const oscillator = this.audioManager.ctx.createOscillator();
+            const modulation = this.audioManager.ctx.createGain();
+            oscillator.frequency.value = frequency;
+            modulation.gain.value = depth;
+            oscillator.connect(modulation);
+            modulation.connect(source.playbackRate);
+            oscillator.start();
+            this.tapeModulators.push(oscillator);
+          });
+        }
 
         // Progressively animate transcript
         const durationMs = audioBuffer.duration * 1000;
@@ -127,7 +147,7 @@ export class CassettePlayer {
     this.startVUMeterSimulation();
   }
 
-  startTapeHiss() {
+  startTapeHiss(level = 0.12) {
     if (!this.audioManager.ctx || !this.audioManager.synth) return;
     try {
       this.hissSource = this.audioManager.ctx.createBufferSource();
@@ -135,7 +155,7 @@ export class CassettePlayer {
       this.hissSource.loop = true;
 
       const gain = this.audioManager.ctx.createGain();
-      gain.gain.value = 0.12;
+      gain.gain.value = level;
 
       this.hissSource.connect(gain);
       gain.connect(this.audioManager.buses.CASSETTE);
@@ -162,6 +182,11 @@ export class CassettePlayer {
       try { this.hissSource.stop(); } catch(e) {}
       this.hissSource = null;
     }
+    this.tapeModulators.forEach((oscillator) => {
+      try { oscillator.stop(); } catch(e) {}
+      try { oscillator.disconnect(); } catch(e) {}
+    });
+    this.tapeModulators = [];
     if (this.vuInterval) {
       clearInterval(this.vuInterval);
       this.vuInterval = null;

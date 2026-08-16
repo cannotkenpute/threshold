@@ -1,0 +1,11 @@
+Model Information:
+* title:	Simple Road
+* source:	https://sketchfab.com/3d-models/simple-road-547179e9b1e44594b59a640d0d7f7112
+* author:	oconop23 (https://sketchfab.com/oconop23)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Simple Road" (https://sketchfab.com/3d-models/simple-road-547179e9b1e44594b59a640d0d7f7112) by oconop23 (https://sketchfab.com/oconop23) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

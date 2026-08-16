@@ -22,7 +22,6 @@ export class EntityDirector {
 
     // Progression Triggers
     this.anomalyCrossed = false;
-    this.tetherSeverTimer = 0;
     this.silhouetteSpawned = false;
     this.chaseActive = false;
     this.chaseSpeed = 4.2;
@@ -74,21 +73,10 @@ export class EntityDirector {
     if (!this.anomalyCrossed && pPos.z <= 12.0) {
       this.anomalyCrossed = true;
       this.stateManager.hasCrossedAnomaly = true;
-      this.player.stepCount = 0; // Begin counting 500 exploration steps
+      this.player.stepCount = 0;
     }
 
-    // 2. Dynamic Tether Update & 500 Step Snap
-    if (this.anomalyCrossed && !this.stateManager.hasTetherBroken) {
-      this.shiftingSpace.updateTether(pPos, false);
-
-      // Snap tether when reaching ~500 steps in the Backrooms
-      const maxTetherSteps = 500;
-      if (this.player.stepCount >= maxTetherSteps) {
-        this.shiftingSpace.severTetherAndCloseEntrance(this.audioManager);
-      }
-    }
-
-    // 3. Tension escalation based on exploration depth & Night Blackouts
+    // 2. Tension escalation based on exploration depth & Night Blackouts
     const isNight = (this.lightManager && this.lightManager.currentPhase === 'NIGHT');
     if (isNight && !this.chaseActive) {
       // Faster sanity drain during complete night blackout
@@ -103,7 +91,7 @@ export class EntityDirector {
       this.audioManager.setTensionState(CONFIG.TENSION_STATES.STATE_2_OBSERVED);
     }
 
-    // 4. Observation Room / Final corridor encounter trigger
+    // 3. Observation Room / Final corridor encounter trigger
     if (pPos.z < -126 && !this.silhouetteSpawned) {
       this.silhouetteSpawned = true;
       this.entityMesh.visible = true;
@@ -112,7 +100,7 @@ export class EntityDirector {
       this.audioManager.setTensionState(CONFIG.TENSION_STATES.STATE_3_DANGER);
     }
 
-    // 5. Approaching Silhouette triggers light shutdown & chase!
+    // 4. Approaching Silhouette triggers light shutdown & chase!
     if (this.silhouetteSpawned && !this.chaseActive && pPos.z < -136) {
       this.startChaseSequence();
     }
@@ -131,8 +119,11 @@ export class EntityDirector {
       // Check distance to player
       const distToPlayer = Math.abs(this.chaseEntityPos.z - pPos.z);
       if (distToPlayer < 1.8) {
-        // Player caught! Intense panic / knockback
+        // Player caught! Intense panic / health damage / screen glitch
         this.player.sanity = Math.max(0, this.player.sanity - 40 * delta);
+        if (this.player.takeDamage) {
+          this.player.takeDamage(30 * delta);
+        }
         if (window.gameRenderer) {
           window.gameRenderer.setVHSGlitch(1.5);
         }

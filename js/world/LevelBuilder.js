@@ -2,7 +2,10 @@
  * 1980s Backrooms Multi-Level World & Chunk Streaming Generator
  * Level 1: "The Yellow Sector" (Infinite Mustard Wallpaper Maze)
  * Level 2: "The Subterranean Complex" (Infinite Parking Garage with Procedural 1980s Cars & Directional Signage)
+ * Level 3: "The Desert Freeway" (Infinite Four-Lane Highway Through a Night Desert)
  */
+
+import { CONFIG } from '../config.js';
 
 export class LevelBuilder {
   constructor(scene, lightManager, shiftingSpace) {
@@ -10,30 +13,66 @@ export class LevelBuilder {
     this.lightManager = lightManager;
     this.shiftingSpace = shiftingSpace;
 
-    this.currentLevel = 1; // 1 = Level 1 Yellow Sector, 2 = Level 2 Parking Garage
+    this.currentLevel = 1;
     this.CHUNK_SIZE = 24.0;
     this.STREAM_RADIUS = 2; // 5x5 chunk active grid around player (120m x 120m)
     this.UNLOAD_RADIUS = 3; // Distance > 3 unloads distant chunks
+    this.CHUNKS_PER_FRAME_BUDGET = 2; // Time-slice cap for incremental streaming (buildFullLevel force path is exempt)
+
+    // Pending chunk-generation queue for the time-sliced streaming path (persists across frames)
+    this.pendingChunkQueue = [];
+
+    // Re-rolled per buildFullLevel() call: reseeds the Level 1 room-region maze
+    // (landmark chunks are hand-authored and never read this, so they never move)
+    this.levelSeed = Math.random() * 10000;
+    this.regionCache = new Map(); // memoized per-macro-block region grids, keyed by "mbx_mbz"
 
     this.activeChunks = new Map(); // Key: `${cx}_${cz}` -> Chunk data
     this.colliders = []; // Global bounding boxes for collision
     this.spatialGrid = new Map(); // Spatial partition for O(1) collision lookups
     this.interactiveObjects = []; // Interactive items/triggers
+    this.interactiveVersion = 0; // bumped on every add/remove; Player uses it to invalidate its raycast-mesh cache
     this.floodedZones = []; // Zones that trigger wet footstep audio
+
+    // Alloc-free collision queries: reused result array + monotonically increasing stamp
+    // used to dedup boxes that appear in multiple spatial-grid cells.
+    this._nearbyCollidersScratch = [];
+    this._queryStamp = 0;
+    // Scratch camera direction for the wallpaper LOD pass (no per-call allocation).
+    this._lodCamDir = new THREE.Vector3();
 
     this.materials = this.createTexturesAndMaterials();
     this.carModelsCache = new Map();
     this.gasCanModel = null;
     this.crowbarModel = null;
     this.highwayRoadModel = null;
+    this.highwayLightModel = null;
+    this.desertGasStationModel = null;
+    this.desertConvenienceStoreModel = null;
+    this.convenienceStoreKeyModel = null;
+    this.isConvenienceStoreUnlocked = false;
+    this.hasConvenienceStoreKeyCollected = false;
+    this.gasStationWalkablePerimeter = {
+      minX: 12.0,
+      maxX: 42.0,
+      minZ: -734.0,
+      maxZ: -704.0
+    };
     this.cityMapModel = null;
     this.initCarAssets();
     this.initGasCanAsset();
     this.initCrowbarAsset();
     this.initHighwayRoadAsset();
-    this.initCityInfrastructureMapAsset();
+    this.initDesertRoadsideLandmarkAssets();
     this.lastPlayerCX = null;
     this.lastPlayerCZ = null;
+    this.wallpaperWallMeshes = [];
+    this.lodFrameCounter = 0;
+
+    // Survival Mode: set by main.js on launch. Gates ration_pack/canteen_water into the
+    // Level 1 item-spawn roll pool and applies the day/night-cycle-driven scarcity multiplier.
+    this.survivalMode = false;
+    this.survivalScarcityMultiplier = 1.0;
   }
 
   initGasCanAsset() {
@@ -104,39 +143,52 @@ export class LevelBuilder {
   }
 
   initHighwayRoadAsset() {
-    if (typeof THREE.OBJLoader === 'undefined') return;
-    const objLoader = new THREE.OBJLoader();
-    const texLoader = new THREE.TextureLoader();
+    if (typeof THREE.GLTFLoader === 'undefined') return;
+    const loader = new THREE.GLTFLoader();
 
-    const baseColor = texLoader.load('./assets/models/highway_road/Scene_-_Root_baseColor.jpg');
-    const normalTex = texLoader.load('./assets/models/highway_road/Scene_-_Root_normal_norm.jpg');
-    const roughTex  = texLoader.load('./assets/models/highway_road/Scene_-_Root_metallicRoughness_rough.jpg');
-    const metalTex  = texLoader.load('./assets/models/highway_road/Scene_-_Root_metallicRoughness_metal.jpg');
-
-    baseColor.wrapS = THREE.RepeatWrapping;
-    baseColor.wrapT = THREE.RepeatWrapping;
-
-    objLoader.load('./assets/models/highway_road/highway_road.obj', (obj) => {
-      // Scaled to real-world highway proportion relative to player (3.8m lane width)
-      obj.scale.set(0.035, 0.035, 0.035);
-      obj.traverse((child) => {
-        if (child.isMesh) {
-          child.castShadow = true;
-          child.receiveShadow = true;
-          child.material = new THREE.MeshStandardMaterial({
-            map: baseColor,
-            normalMap: normalTex,
-            roughnessMap: roughTex,
-            metalnessMap: metalTex,
-            roughness: 0.85,
-            metalness: 0.15
-          });
-        }
-      });
-      console.log('[Highway_Road] OBJ loaded successfully');
-      this.highwayRoadModel = obj;
+    loader.load('./assets/models/desert_freeway_road/simple-road_extracted/scene.gltf', (gltf) => {
+      gltf.scene.updateMatrixWorld(true);
+      this.highwayRoadModel = gltf.scene;
+      console.log('[DesertFreeway] Sketchfab road loaded successfully.');
     }, undefined, (err) => {
-      console.warn('[Highway_Road] Failed to load OBJ:', err);
+      console.warn('[DesertFreeway] Failed to load Sketchfab road:', err);
+    });
+
+    loader.load('./assets/models/desert_freeway_lights/street-lights_extracted/scene.gltf', (gltf) => {
+      gltf.scene.updateMatrixWorld(true);
+      this.highwayLightModel = gltf.scene.getObjectByName('polySurface109') || gltf.scene;
+      console.log('[DesertFreeway] Sketchfab highway lights loaded successfully.');
+    }, undefined, (err) => {
+      console.warn('[DesertFreeway] Failed to load Sketchfab highway lights:', err);
+    });
+  }
+
+  initDesertRoadsideLandmarkAssets() {
+    if (typeof THREE.GLTFLoader === 'undefined') return;
+    const loader = new THREE.GLTFLoader();
+
+    loader.load('./assets/models/desert_gas_station/retro-gas-station_extracted/scene.gltf', (gltf) => {
+      gltf.scene.updateMatrixWorld(true);
+      this.desertGasStationModel = gltf.scene;
+      console.log('[DesertFreeway] Sketchfab gas station loaded successfully.');
+    }, undefined, (err) => {
+      console.warn('[DesertFreeway] Failed to load Sketchfab gas station:', err);
+    });
+
+    loader.load('./assets/models/desert_convenience_store/psx-store_extracted/scene.gltf', (gltf) => {
+      gltf.scene.updateMatrixWorld(true);
+      this.desertConvenienceStoreModel = gltf.scene;
+      console.log('[DesertFreeway] Sketchfab convenience store loaded successfully.');
+    }, undefined, (err) => {
+      console.warn('[DesertFreeway] Failed to load Sketchfab convenience store:', err);
+    });
+
+    loader.load('./assets/models/convenience_store_key/antique-old-key_extracted/scene.gltf', (gltf) => {
+      gltf.scene.updateMatrixWorld(true);
+      this.convenienceStoreKeyModel = gltf.scene;
+      console.log('[DesertFreeway] Sketchfab convenience-store key loaded successfully.');
+    }, undefined, (err) => {
+      console.warn('[DesertFreeway] Failed to load Sketchfab convenience-store key:', err);
     });
   }
 
@@ -213,10 +265,7 @@ export class LevelBuilder {
         loadedCount++;
         // As soon as FBX cars load, re-stream Level 2 chunks so the menu pan populates with 3D cars
         if (this.currentLevel === 2 && loadedCount === 1) {
-          this.activeChunks.forEach((chunk) => {
-            chunk.meshes.forEach(m => this.scene.remove(m));
-          });
-          this.activeChunks.clear();
+          this.clearAllWorld();
         }
       }, undefined, (err) => {
         console.warn(`Could not load car model ${path}:`, err);
@@ -225,51 +274,43 @@ export class LevelBuilder {
   }
 
   createTexturesAndMaterials() {
-    // 1. Procedural Yellow Damask / Grid Wallpaper Texture (Level 1)
-    const wallpaperCanvas = document.createElement('canvas');
-    wallpaperCanvas.width = 256;
-    wallpaperCanvas.height = 256;
-    const ctxW = wallpaperCanvas.getContext('2d');
-    ctxW.fillStyle = '#c9b360';
-    ctxW.fillRect(0, 0, 256, 256);
+    const texLoader = new THREE.TextureLoader();
 
-    // Subtle wallpaper diamond pattern & vertical seam lines
-    ctxW.strokeStyle = '#b09d52';
-    ctxW.lineWidth = 2;
-    for (let x = 0; x < 256; x += 32) {
-      for (let y = 0; y < 256; y += 32) {
-        ctxW.strokeRect(x + 4, y + 4, 24, 24);
-      }
-    }
-    // Age stains & moisture patches
-    ctxW.fillStyle = 'rgba(120, 100, 40, 0.15)';
-    ctxW.beginPath();
-    ctxW.arc(180, 70, 40, 0, Math.PI * 2);
-    ctxW.fill();
-    ctxW.beginPath();
-    ctxW.arc(60, 190, 50, 0, Math.PI * 2);
-    ctxW.fill();
+    // 1. Authentic Backrooms Wallpaper Textures (High-Res 512x512 with normal map & Low-Res 128x128 LOD)
+    const wallTexHigh = texLoader.load('./assets/textures/backrooms-wallpaper.jpg');
+    wallTexHigh.wrapS = THREE.RepeatWrapping;
+    wallTexHigh.wrapT = THREE.RepeatWrapping;
+    wallTexHigh.repeat.set(1.5, 1.2);
+    wallTexHigh.encoding = THREE.sRGBEncoding;
 
-    const wallTex = new THREE.CanvasTexture(wallpaperCanvas);
-    wallTex.wrapS = THREE.RepeatWrapping;
-    wallTex.wrapT = THREE.RepeatWrapping;
-    wallTex.repeat.set(2, 1.5);
+    const wallNormalHigh = texLoader.load('./assets/textures/backrooms-wallpaper-normal.jpg');
+    wallNormalHigh.wrapS = THREE.RepeatWrapping;
+    wallNormalHigh.wrapT = THREE.RepeatWrapping;
+    wallNormalHigh.repeat.set(1.5, 1.2);
 
-    // 2. Damp Carpet Texture (Level 1)
-    const carpetCanvas = document.createElement('canvas');
-    carpetCanvas.width = 256;
-    carpetCanvas.height = 256;
-    const ctxC = carpetCanvas.getContext('2d');
-    ctxC.fillStyle = '#6e5f3a';
-    ctxC.fillRect(0, 0, 256, 256);
-    for (let i = 0; i < 4000; i++) {
-      ctxC.fillStyle = Math.random() > 0.5 ? '#594d2e' : '#7d6d43';
-      ctxC.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
-    }
-    const carpetTex = new THREE.CanvasTexture(carpetCanvas);
-    carpetTex.wrapS = THREE.RepeatWrapping;
-    carpetTex.wrapT = THREE.RepeatWrapping;
-    carpetTex.repeat.set(4, 4);
+    // Low-Res LOD Texture for off-screen / distant / peripheral walls
+    const wallTexLow = texLoader.load('./assets/textures/backrooms-wallpaper-low.jpg');
+    wallTexLow.wrapS = THREE.RepeatWrapping;
+    wallTexLow.wrapT = THREE.RepeatWrapping;
+    wallTexLow.repeat.set(1.5, 1.2);
+    wallTexLow.encoding = THREE.sRGBEncoding;
+
+    // 2. Authentic Level 1 Carpet Textures (Albedo, 3D Normal Map & Roughness)
+    const carpetAlbedo = texLoader.load('./assets/textures/carpet_texture.jpg');
+    carpetAlbedo.wrapS = THREE.RepeatWrapping;
+    carpetAlbedo.wrapT = THREE.RepeatWrapping;
+    carpetAlbedo.repeat.set(24, 24);
+    carpetAlbedo.encoding = THREE.sRGBEncoding;
+
+    const carpetNormal = texLoader.load('./assets/textures/carpet_normal.jpg');
+    carpetNormal.wrapS = THREE.RepeatWrapping;
+    carpetNormal.wrapT = THREE.RepeatWrapping;
+    carpetNormal.repeat.set(24, 24);
+
+    const carpetRoughness = texLoader.load('./assets/textures/carpet_roughness.jpg');
+    carpetRoughness.wrapS = THREE.RepeatWrapping;
+    carpetRoughness.wrapT = THREE.RepeatWrapping;
+    carpetRoughness.repeat.set(24, 24);
 
     // 3. Acoustic Ceiling Tile Texture (Level 1)
     const ceilingCanvas = document.createElement('canvas');
@@ -373,7 +414,57 @@ export class LevelBuilder {
     }
     const pillarTex = new THREE.CanvasTexture(pillarCanvas);
 
-    // 8. 1980s Retro Car Paint Colors
+    // 8. Level 3 Four-Lane Weathered Freeway Texture
+    const roadCanvas = document.createElement('canvas');
+    roadCanvas.width = 512;
+    roadCanvas.height = 512;
+    const ctxR = roadCanvas.getContext('2d');
+    ctxR.fillStyle = '#181b1d';
+    ctxR.fillRect(0, 0, 512, 512);
+
+    // Asphalt noise grain
+    for (let i = 0; i < 6000; i++) {
+      ctxR.fillStyle = Math.random() > 0.5 ? '#131517' : '#222629';
+      ctxR.fillRect(Math.random() * 512, Math.random() * 512, 2, 2);
+    }
+    // Solid white outer shoulder lines
+    ctxR.fillStyle = '#c5d0d8';
+    ctxR.fillRect(22, 0, 7, 512);
+    ctxR.fillRect(483, 0, 7, 512);
+
+    // Broken white lane dividers for two lanes in each direction
+    ctxR.fillStyle = '#d5dbdc';
+    for (let y = 16; y < 512; y += 64) {
+      ctxR.fillRect(132, y, 5, 36);
+      ctxR.fillRect(375, y, 5, 36);
+    }
+
+    // Solid yellow lines border the concrete median.
+    ctxR.fillStyle = '#d2ad2e';
+    ctxR.fillRect(239, 0, 6, 512);
+    ctxR.fillRect(267, 0, 6, 512);
+    const highwayRoadTex = new THREE.CanvasTexture(roadCanvas);
+    highwayRoadTex.wrapS = THREE.RepeatWrapping;
+    highwayRoadTex.wrapT = THREE.RepeatWrapping;
+    highwayRoadTex.repeat.set(1, 2);
+
+    // 9. Desert Sand & Gravel Shoulder Texture
+    const desertCanvas = document.createElement('canvas');
+    desertCanvas.width = 256;
+    desertCanvas.height = 256;
+    const ctxF = desertCanvas.getContext('2d');
+    ctxF.fillStyle = '#8f6f43';
+    ctxF.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 3000; i++) {
+      ctxF.fillStyle = Math.random() > 0.5 ? '#715536' : '#aa8650';
+      ctxF.fillRect(Math.random() * 256, Math.random() * 256, 3, 3);
+    }
+    const desertGroundTex = new THREE.CanvasTexture(desertCanvas);
+    desertGroundTex.wrapS = THREE.RepeatWrapping;
+    desertGroundTex.wrapT = THREE.RepeatWrapping;
+    desertGroundTex.repeat.set(3, 3);
+
+    // 10. 1980s Retro Car Paint Colors
     const carPaints = [
       new THREE.MeshPhongMaterial({ color: 0x732020, shininess: 40, specular: 0x555555 }), // Burgundy
       new THREE.MeshPhongMaterial({ color: 0x243a59, shininess: 40, specular: 0x555555 }), // Faded Navy
@@ -384,9 +475,33 @@ export class LevelBuilder {
     ];
 
     return {
-      wallpaper: new THREE.MeshPhongMaterial({ map: wallTex, shininess: 2, specular: 0x111111 }),
-      carpet: new THREE.MeshPhongMaterial({ map: carpetTex, shininess: 1, specular: 0x080808 }),
-      wetCarpet: new THREE.MeshPhongMaterial({ map: carpetTex, color: 0x3d3520, shininess: 16, specular: 0x333333 }),
+      wallpaper: new THREE.MeshPhongMaterial({
+        map: wallTexHigh,
+        normalMap: wallNormalHigh,
+        normalScale: new THREE.Vector2(0.8, 0.8),
+        shininess: 2,
+        specular: 0x111111
+      }),
+      wallpaperLow: new THREE.MeshPhongMaterial({
+        map: wallTexLow,
+        shininess: 1,
+        specular: 0x050505
+      }),
+      carpet: new THREE.MeshPhongMaterial({
+        map: carpetAlbedo,
+        normalMap: carpetNormal,
+        normalScale: new THREE.Vector2(1.2, 1.2),
+        shininess: 3,
+        specular: 0x111111
+      }),
+      wetCarpet: new THREE.MeshPhongMaterial({
+        map: carpetAlbedo,
+        normalMap: carpetNormal,
+        normalScale: new THREE.Vector2(1.8, 1.8),
+        color: 0x3d3420,
+        shininess: 24,
+        specular: 0x444444
+      }),
       ceiling: new THREE.MeshPhongMaterial({ map: ceilingTex, shininess: 2, specular: 0x111111 }),
       labFloor: new THREE.MeshPhongMaterial({ map: labTex, shininess: 8, specular: 0x222222 }),
       labWall: new THREE.MeshPhongMaterial({ color: 0x485250, shininess: 4, specular: 0x111111 }),
@@ -409,6 +524,16 @@ export class LevelBuilder {
       garageCeiling: new THREE.MeshPhongMaterial({ map: garageCeilTex, shininess: 3, specular: 0x111111 }),
       garagePillar: new THREE.MeshPhongMaterial({ map: pillarTex, shininess: 4, specular: 0x222222 }),
       garagePipes: new THREE.MeshPhongMaterial({ color: 0x3d4447, shininess: 25, specular: 0x555555 }),
+
+      // Level 3 Highway Materials
+      highwayRoad: new THREE.MeshPhongMaterial({ map: highwayRoadTex, shininess: 12, specular: 0x333333 }),
+      desertGround: new THREE.MeshPhongMaterial({ map: desertGroundTex, shininess: 1 }),
+      desertRock: new THREE.MeshLambertMaterial({ color: 0x5f4935 }),
+      cactus: new THREE.MeshLambertMaterial({ color: 0x294b32 }),
+      treeBark: new THREE.MeshLambertMaterial({ color: 0x181410 }),
+      guardrail: new THREE.MeshPhongMaterial({ color: 0x58646b, shininess: 40, specular: 0x777777 }),
+      highwaySignGreen: new THREE.MeshLambertMaterial({ color: 0x0c3d1e }),
+
       carTire: new THREE.MeshPhongMaterial({ color: 0x141414, shininess: 5 }),
       carGlass: new THREE.MeshPhongMaterial({ color: 0x1a2428, shininess: 60, transparent: true, opacity: 0.85 }),
       carBumper: new THREE.MeshPhongMaterial({ color: 0x82888c, shininess: 50, specular: 0xaaaaaa }),
@@ -423,42 +548,186 @@ export class LevelBuilder {
   // Master build entry point for Level 1
   buildFullLevel() {
     this.currentLevel = 1;
+    this.levelSeed = Math.random() * 10000; // new maze layout every run; landmarks are unaffected
+    this.regionCache.clear();
     this.clearAllWorld();
     this.update(new THREE.Vector3(0, 1.65, 20), true);
   }
 
-  // Switch to Level 2 (Parking Garage) or Level 3 (The Dark Highway)
+  // Switch to Level 2 (Parking Garage) or Level 3 (The Desert Freeway)
   switchLevel(levelNumber, playerPos = new THREE.Vector3(0, 1.65, 0)) {
     this.currentLevel = levelNumber;
     this.clearAllWorld();
 
-    if (levelNumber === 3) {
-      if (this.cityMapModel && !this.scene.children.includes(this.cityMapModel)) {
-        this.scene.add(this.cityMapModel);
-      }
+    if (this.currentLevel === 3) {
+      this.createArtificialSky(playerPos);
     } else {
-      if (this.cityMapModel && this.scene.children.includes(this.cityMapModel)) {
-        this.scene.remove(this.cityMapModel);
-      }
+      this.removeArtificialSky();
+    }
+
+    // Level 3 is an isolated desert freeway; urban infrastructure never carries over.
+    if (this.cityMapModel && this.scene.children.includes(this.cityMapModel)) {
+      this.scene.remove(this.cityMapModel);
     }
 
     this.update(playerPos, true);
   }
 
+  createArtificialSky(playerPos) {
+    this.removeArtificialSky();
+
+    const skyGroup = new THREE.Group();
+    const pX = playerPos ? playerPos.x : 0;
+    const pZ = playerPos ? playerPos.z : 0;
+    skyGroup.position.set(pX, 0, pZ);
+
+    // 1. Vast Hemispherical Sky Dome with Subtle Grid & Horizon Haze (Artificial Anomaly Sky)
+    const skyDomeGeo = new THREE.SphereGeometry(280, 32, 24, 0, Math.PI * 2, 0, Math.PI * 0.52);
+    const skyDomeMat = new THREE.MeshBasicMaterial({
+      color: 0x4a6572,
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false
+    });
+    const skyDome = new THREE.Mesh(skyDomeGeo, skyDomeMat);
+    skyDome.name = 'ArtificialSkyDome';
+    skyGroup.add(skyDome);
+
+    // 2. Artificial Glowing Sun Sphere (Simulated Anomaly Luminary)
+    const sunGroup = new THREE.Group();
+    sunGroup.name = 'ArtificialSunGroup';
+    // Position sun high in the southern sky
+    sunGroup.position.set(50, 140, -180);
+
+    // Core blazing sun sphere
+    const sunGeo = new THREE.SphereGeometry(14, 20, 20);
+    const sunMat = new THREE.MeshBasicMaterial({
+      color: 0xfffae0,
+      depthWrite: false,
+      fog: false
+    });
+    const sunMesh = new THREE.Mesh(sunGeo, sunMat);
+    sunGroup.add(sunMesh);
+
+    // Outer solar corona / glow halo
+    const coronaGeo = new THREE.SphereGeometry(22, 16, 16);
+    const coronaMat = new THREE.MeshBasicMaterial({
+      color: 0xffd277,
+      transparent: true,
+      opacity: 0.38,
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false
+    });
+    const coronaMesh = new THREE.Mesh(coronaGeo, coronaMat);
+    sunGroup.add(coronaMesh);
+
+    skyGroup.add(sunGroup);
+
+    this.scene.add(skyGroup);
+    this.artificialSkyGroup = skyGroup;
+  }
+
+  removeArtificialSky() {
+    if (this.artificialSkyGroup) {
+      this.scene.remove(this.artificialSkyGroup);
+      this.artificialSkyGroup = null;
+    }
+  }
+
   clearAllWorld() {
-    for (let [key] of this.activeChunks) {
-      this.removeChunk(key);
+    this.removeArtificialSky();
+    const keys = Array.from(this.activeChunks.keys());
+    for (let i = 0; i < keys.length; i++) {
+      this.removeChunk(keys[i]);
     }
     this.activeChunks.clear();
     this.colliders.length = 0;
     this.spatialGrid.clear();
     this.interactiveObjects.length = 0;
+    this.interactiveVersion++;
     this.floodedZones.length = 0;
+    this.wallpaperWallMeshes.length = 0;
+    this.pendingChunkQueue.length = 0;
     this.lastPlayerCX = null;
     this.lastPlayerCZ = null;
 
     if (this.currentLevel !== 3 && this.cityMapModel) {
       this.scene.remove(this.cityMapModel);
+    }
+  }
+
+  // Dispatches to the correct per-level chunk generator. Shared by the forced
+  // full-load path and the time-sliced incremental streaming drain below.
+  generateChunkForLevel(cx, cz) {
+    const key = `${cx}_${cz}`;
+    try {
+      if (this.currentLevel === 3) {
+        this.generateHighwayChunk(cx, cz);
+      } else if (this.currentLevel === 2) {
+        this.generateParkingGarageChunk(cx, cz);
+      } else {
+        this.generateChunk(cx, cz);
+      }
+    } catch (err) {
+      // A throw mid-generation would otherwise propagate out of update() and kill the whole
+      // render loop -- the frame never reaches render(), and because WebGL doesn't preserve the
+      // drawing buffer the canvas goes black. Contain it to the one bad chunk instead.
+      console.error(`[LevelBuilder] Chunk ${key} failed to generate:`, err);
+      // Register a placeholder so the failed chunk isn't re-queued and retried every frame.
+      if (!this.activeChunks.has(key)) {
+        this.activeChunks.set(key, {
+          key, cx, cz, meshes: [], colliders: [], lights: [], interactive: [], flooded: [], failed: true
+        });
+      }
+    }
+  }
+
+  // Generates queued chunks until the frame's wall-clock budget is spent, closest-to-player
+  // first. Re-sorts by current distance every drain so priority stays accurate as the player
+  // keeps moving, and re-validates range at generation time so a chunk the player has since
+  // sprinted away from is skipped instead of being generated only to be unloaded on the very
+  // next update. A time budget (instead of a fixed chunk count) smooths streaming: one heavy
+  // parking-garage chunk with a dozen cars can take longer than two simple maze chunks.
+  drainPendingChunkQueue(currentCX, currentCZ) {
+    if (this.pendingChunkQueue.length === 0) return;
+
+    const streamRadiusX = this.currentLevel === 3 ? 1 : this.STREAM_RADIUS;
+    const streamRadiusZ = this.STREAM_RADIUS;
+
+    this.pendingChunkQueue.sort((a, b) => {
+      const da = Math.max(Math.abs(a.cx - currentCX), Math.abs(a.cz - currentCZ));
+      const db = Math.max(Math.abs(b.cx - currentCX), Math.abs(b.cz - currentCZ));
+      return da - db;
+    });
+
+    const budgetMs = CONFIG.PERF.CHUNK_FRAME_BUDGET_MS;
+    const deadline = performance.now() + budgetMs;
+    let i = 0;
+    while (i < this.pendingChunkQueue.length) {
+      // Budget check happens before starting each chunk; an in-progress chunk always runs
+      // to completion (generation is synchronous), and at least one chunk is attempted
+      // per drain when anything is in range so the queue can never stall.
+      if (performance.now() > deadline && i > 0) break;
+
+      const entry = this.pendingChunkQueue[i];
+
+      // Already generated (e.g. queued twice before its turn came up) -- drop silently.
+      if (this.activeChunks.has(entry.key)) {
+        this.pendingChunkQueue.splice(i, 1);
+        continue;
+      }
+
+      const distX = Math.abs(entry.cx - currentCX);
+      const distZ = Math.abs(entry.cz - currentCZ);
+      const inRange = distX <= streamRadiusX && distZ <= streamRadiusZ;
+      if (!inRange) {
+        this.pendingChunkQueue.splice(i, 1);
+        continue;
+      }
+
+      this.generateChunkForLevel(entry.cx, entry.cz);
+      this.pendingChunkQueue.splice(i, 1);
     }
   }
 
@@ -469,38 +738,82 @@ export class LevelBuilder {
     const currentCX = Math.round(playerPos.x / this.CHUNK_SIZE);
     const currentCZ = Math.round(playerPos.z / this.CHUNK_SIZE);
 
-    if (!force && currentCX === this.lastPlayerCX && currentCZ === this.lastPlayerCZ) {
+    if (this.currentLevel === 3 && this.artificialSkyGroup) {
+      this.artificialSkyGroup.position.set(playerPos.x, 0, playerPos.z);
+    }
+
+    const crossedChunk = force || currentCX !== this.lastPlayerCX || currentCZ !== this.lastPlayerCZ;
+
+    if (!crossedChunk) {
+      // Keep draining the pending queue even when the player hasn't crossed into a new chunk this
+      // frame, so time-sliced generation makes progress every frame instead of only on boundary-crosses.
+      this.drainPendingChunkQueue(currentCX, currentCZ);
       return;
     }
 
     this.lastPlayerCX = currentCX;
     this.lastPlayerCZ = currentCZ;
 
-    // 1. Generate active chunks in STREAM_RADIUS
-    for (let dx = -this.STREAM_RADIUS; dx <= this.STREAM_RADIUS; dx++) {
-      for (let dz = -this.STREAM_RADIUS; dz <= this.STREAM_RADIUS; dz++) {
-        const cx = currentCX + dx;
-        const cz = currentCZ + dz;
-        const key = `${cx}_${cz}`;
-        if (!this.activeChunks.has(key)) {
-          if (this.currentLevel === 3) {
-            this.generateHighwayChunk(cx, cz);
-          } else if (this.currentLevel === 2) {
-            this.generateParkingGarageChunk(cx, cz);
-          } else {
-            this.generateChunk(cx, cz);
+    // The freeway is corridor-shaped, so it only needs one desert chunk on each side.
+    const streamRadiusX = this.currentLevel === 3 ? 1 : this.STREAM_RADIUS;
+    const streamRadiusZ = this.STREAM_RADIUS;
+
+    if (force) {
+      // One-time synchronous full load (level start / mode launch): the player has just clicked a
+      // menu button and isn't in control yet, so a single guaranteed synchronous load is the right
+      // tradeoff here -- better than spawning into missing geometry. Deliberately NOT time-sliced.
+      for (let dx = -streamRadiusX; dx <= streamRadiusX; dx++) {
+        for (let dz = -streamRadiusZ; dz <= streamRadiusZ; dz++) {
+          const cx = currentCX + dx;
+          const cz = currentCZ + dz;
+          const key = `${cx}_${cz}`;
+          if (!this.activeChunks.has(key)) {
+            this.generateChunkForLevel(cx, cz);
           }
+        }
+      }
+      // Discard any stale queue entries from before this forced rebuild (e.g. level restart).
+      this.pendingChunkQueue.length = 0;
+    } else {
+      // Ongoing-movement streaming: queue not-yet-active, not-already-queued chunks in range instead
+      // of generating them all synchronously; drainPendingChunkQueue() below spreads the work
+      // across frames at CHUNKS_PER_FRAME_BUDGET per call.
+      for (let dx = -streamRadiusX; dx <= streamRadiusX; dx++) {
+        for (let dz = -streamRadiusZ; dz <= streamRadiusZ; dz++) {
+          const cx = currentCX + dx;
+          const cz = currentCZ + dz;
+          const key = `${cx}_${cz}`;
+          if (this.activeChunks.has(key)) continue;
+          if (this.pendingChunkQueue.some(e => e.key === key)) continue;
+          this.pendingChunkQueue.push({ key, cx, cz });
         }
       }
     }
 
     // 2. Unload chunks beyond UNLOAD_RADIUS (preserve origin lab chunks in Level 1)
+    const keysToRemove = [];
     for (let [key, chunk] of this.activeChunks.entries()) {
       if (this.currentLevel === 1 && (key === '0_1' || key === '0_0')) continue;
-      const dist = Math.max(Math.abs(chunk.cx - currentCX), Math.abs(chunk.cz - currentCZ));
-      if (dist > this.UNLOAD_RADIUS) {
-        this.removeChunk(key);
+      const distX = Math.abs(chunk.cx - currentCX);
+      const distZ = Math.abs(chunk.cz - currentCZ);
+      const shouldUnload = this.currentLevel === 3
+        ? distX > streamRadiusX || distZ > streamRadiusZ
+        : Math.max(distX, distZ) > this.UNLOAD_RADIUS;
+      if (shouldUnload) {
+        keysToRemove.push(key);
       }
+    }
+    for (let i = 0; i < keysToRemove.length; i++) {
+      this.removeChunk(keysToRemove[i]);
+      // A chunk that was queued for generation but has now scrolled out of range and been
+      // unloaded (shouldn't normally coexist, but guards against edge cases) should not linger.
+      const removedKey = keysToRemove[i];
+      const qi = this.pendingChunkQueue.findIndex(e => e.key === removedKey);
+      if (qi !== -1) this.pendingChunkQueue.splice(qi, 1);
+    }
+
+    if (!force) {
+      this.drainPendingChunkQueue(currentCX, currentCZ);
     }
   }
 
@@ -623,7 +936,7 @@ export class LevelBuilder {
         name: 'Sedan Vehicle — [E] ENTER & START ENGINE',
         worldPos: new THREE.Vector3(spawnCarX, 0.9, spawnCarZ)
       };
-      this.interactiveObjects.push(spawnCarInteractive);
+      this.pushInteractive(spawnCarInteractive);
       chunkData.interactive.push(spawnCarInteractive);
     } else if (cx === -1 && cz === -1) {
       // Landmark Gas Can placed beside an abandoned car and support pillar
@@ -698,7 +1011,7 @@ export class LevelBuilder {
         unlocked: false,
         fueled: false,
       };
-      this.interactiveObjects.push(lockedCarObj);
+      this.pushInteractive(lockedCarObj);
       chunkData.interactive.push(lockedCarObj);
     }
 
@@ -879,8 +1192,19 @@ export class LevelBuilder {
   }
 
   // =========================================================================
-  // LEVEL 3: THE DARK HIGHWAY PROCEDURAL GENERATOR (Highway_Road.usdz)
+  // LEVEL 3: INFINITE DESERT FREEWAY PROCEDURAL GENERATOR (Route 9 Anomaly)
   // =========================================================================
+  createPRNG(seed) {
+    let state = Math.trunc(seed) >>> 0;
+    return () => {
+      state = (state + 0x6D2B79F5) >>> 0;
+      let value = state;
+      value = Math.imul(value ^ (value >>> 15), value | 1);
+      value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+      return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
   generateHighwayChunk(cx, cz) {
     const key = `${cx}_${cz}`;
     const centerX = cx * this.CHUNK_SIZE;
@@ -893,130 +1217,256 @@ export class LevelBuilder {
       meshes: [],
       colliders: [],
       lights: [],
-      interactive: []
+      interactive: [],
+      flooded: []
     };
 
     const prng = this.createPRNG(cx * 1337 + cz * 7919 + 333);
 
-    // 1. 3D Highway Road Surface (From Highway_Road.usdz model or PBR fallback)
-    if (this.highwayRoadModel && Math.abs(cx) <= 1) {
-      const roadClone = this.highwayRoadModel.clone();
-      roadClone.position.set(centerX, 0, centerZ);
-      this.scene.add(roadClone);
-      chunkData.meshes.push(roadClone);
-    } else {
-      // Asphalt slab underlay
-      const roadGeo = new THREE.PlaneGeometry(this.CHUNK_SIZE, this.CHUNK_SIZE, 4, 4);
-      const roadMat = new THREE.MeshStandardMaterial({
-        color: 0x14181a,
-        roughness: 0.85,
-        metalness: 0.1
-      });
-      const roadMesh = new THREE.Mesh(roadGeo, roadMat);
+    // 1. Four-Lane divided freeway surface
+    if (cx === 0) {
+      const roadGeo = new THREE.PlaneGeometry(24.0, this.CHUNK_SIZE);
+      const roadMesh = new THREE.Mesh(roadGeo, this.materials.highwayRoad);
       roadMesh.rotation.x = -Math.PI / 2;
-      roadMesh.position.set(centerX, 0, centerZ);
+      roadMesh.position.set(centerX, 0.01, centerZ);
       roadMesh.receiveShadow = true;
       this.scene.add(roadMesh);
       chunkData.meshes.push(roadMesh);
-    }
 
-    // Roadside gravel/dirt terrain shoulders on sides
-    if (cx === -1 || cx === 1) {
-      const shoulderGeo = new THREE.PlaneGeometry(this.CHUNK_SIZE, this.CHUNK_SIZE);
-      const shoulderMat = new THREE.MeshStandardMaterial({ color: 0x0a100c, roughness: 0.95 });
-      const shoulder = new THREE.Mesh(shoulderGeo, shoulderMat);
-      shoulder.rotation.x = -Math.PI / 2;
-      shoulder.position.set(centerX, -0.02, centerZ);
-      this.scene.add(shoulder);
-      chunkData.meshes.push(shoulder);
-    }
+      // Sketchfab road segment overlays the procedural surface when available.
+      [-6.05, 6.05].forEach((roadX, index) => {
+        const roadAsset = this.createFittedHighwayRoadAsset(roadX, centerZ, index === 0 ? 0 : Math.PI);
+        if (!roadAsset) return;
+        this.scene.add(roadAsset);
+        chunkData.meshes.push(roadAsset);
+      });
 
-    // 2. Highway Metal Guardrails (at X = -10.5 and X = +10.5 along highway)
-    if (cx === 0) {
-      const railMat = new THREE.MeshStandardMaterial({ color: 0x5a666e, metalness: 0.8, roughness: 0.35 });
-      
-      [-10.5, 10.5].forEach(railX => {
-        const railGeo = new THREE.BoxGeometry(0.25, 0.7, this.CHUNK_SIZE);
-        const rail = new THREE.Mesh(railGeo, railMat);
-        rail.position.set(railX, 0.45, centerZ);
-        rail.castShadow = true;
-        rail.receiveShadow = true;
-        this.scene.add(rail);
-        chunkData.meshes.push(rail);
+      // Sand and gravel shoulders blend the freeway into the desert.
+      [-14.0, 14.0].forEach(sx => {
+        const shoulderGeo = new THREE.PlaneGeometry(4.0, this.CHUNK_SIZE);
+        const shoulder = new THREE.Mesh(shoulderGeo, this.materials.desertGround);
+        shoulder.rotation.x = -Math.PI / 2;
+        shoulder.position.set(centerX + sx, 0.0, centerZ);
+        shoulder.receiveShadow = true;
+        this.scene.add(shoulder);
+        chunkData.meshes.push(shoulder);
+      });
 
-        // Solid collider for guardrails
-        const box = new THREE.Box3().setFromObject(rail);
+      // Low concrete median divides opposing traffic lanes.
+      const median = new THREE.Mesh(
+        new THREE.BoxGeometry(0.62, 0.42, this.CHUNK_SIZE),
+        new THREE.MeshPhongMaterial({ color: 0x77736a, shininess: 4 })
+      );
+      median.position.set(0, 0.21, centerZ);
+      this.scene.add(median);
+      chunkData.meshes.push(median);
+      const medianCollider = new THREE.Box3().setFromObject(median);
+      this.registerCollider(medianCollider);
+      chunkData.colliders.push(medianCollider);
+
+      // The station row leaves a wide opening in the east guardrail for its driveway.
+      const isNearStation = Math.abs(cz - (-30)) <= 1;
+      const guardrailXs = isNearStation ? [-12.35] : [-12.35, 12.35];
+      guardrailXs.forEach((railX) => {
+        const rIdx = railX < 0 ? 0 : 1;
+        const railGroup = new THREE.Group();
+        railGroup.position.set(railX, 0.45, centerZ);
+
+        // Continuous beam
+        const beamGeo = new THREE.BoxGeometry(0.2, 0.5, this.CHUNK_SIZE);
+        const beam = new THREE.Mesh(beamGeo, this.materials.guardrail);
+        beam.castShadow = false;
+        railGroup.add(beam);
+
+        // Support I-beam posts every 6m
+        for (let pz = -this.CHUNK_SIZE / 2 + 3; pz < this.CHUNK_SIZE / 2; pz += 6) {
+          const postGeo = new THREE.BoxGeometry(0.15, 0.9, 0.15);
+          const post = new THREE.Mesh(postGeo, this.materials.guardrail);
+          post.position.set(rIdx === 0 ? -0.1 : 0.1, -0.2, pz);
+          railGroup.add(post);
+
+          // Small amber/red reflector stud on guardrail post
+          const refGeo = new THREE.BoxGeometry(0.04, 0.12, 0.06);
+          const refMat = new THREE.MeshBasicMaterial({ color: rIdx === 0 ? 0xffcc22 : 0xee3322 });
+          const refMesh = new THREE.Mesh(refGeo, refMat);
+          refMesh.position.set(rIdx === 0 ? 0.12 : -0.12, 0.0, pz);
+          railGroup.add(refMesh);
+        }
+
+        this.scene.add(railGroup);
+        chunkData.meshes.push(railGroup);
+
+        const box = new THREE.Box3().setFromObject(railGroup);
         this.registerCollider(box);
         chunkData.colliders.push(box);
       });
-    }
 
-    // 3. Telegraph / Utility Poles with crossbeams every 2 chunks
-    if (cx === 0 && Math.abs(cz % 2) === 0) {
-      const poleGroup = new THREE.Group();
-      const poleMat = new THREE.MeshStandardMaterial({ color: 0x241e17, roughness: 0.9 });
-      const poleGeo = new THREE.CylinderGeometry(0.18, 0.22, 10, 8);
-      const pole = new THREE.Mesh(poleGeo, poleMat);
-      pole.position.set(-12.5, 5.0, centerZ);
-      poleGroup.add(pole);
+      // 3. Sparse wooden utility poles crossing the open desert.
+      if (Math.abs(cz % 2) === 0) {
+        const poleGroup = new THREE.Group();
+        poleGroup.position.set(centerX - 17.0, 0, centerZ);
 
-      // Crossbar
-      const barGeo = new THREE.BoxGeometry(2.4, 0.2, 0.2);
-      const bar = new THREE.Mesh(barGeo, poleMat);
-      bar.position.set(-12.5, 9.2, centerZ);
-      poleGroup.add(bar);
+        // Tall wooden pole
+        const poleGeo = new THREE.CylinderGeometry(0.18, 0.22, 11, 8);
+        const pole = new THREE.Mesh(poleGeo, this.materials.treeBark);
+        pole.position.y = 5.5;
+        pole.castShadow = false;
+        poleGroup.add(pole);
 
-      this.scene.add(poleGroup);
-      chunkData.meshes.push(poleGroup);
-    }
+        // Crossarm beam
+        const crossGeo = new THREE.BoxGeometry(2.8, 0.2, 0.2);
+        const cross = new THREE.Mesh(crossGeo, this.materials.treeBark);
+        cross.position.set(0, 10.2, 0);
+        poleGroup.add(cross);
 
-    // 4. Dark Pine Forest Silhouettes on outer edges
-    if (cx <= -1 || cx >= 1) {
-      const treeCount = 4 + Math.floor(prng() * 4);
-      const treeMat = new THREE.MeshBasicMaterial({ color: 0x050a06 });
-      for (let i = 0; i < treeCount; i++) {
-        const tx = centerX + (prng() - 0.5) * 20;
-        const tz = centerZ + (prng() - 0.5) * 20;
-        const treeH = 10 + prng() * 8;
-        const treeGeo = new THREE.ConeGeometry(3.5, treeH, 5);
-        const tree = new THREE.Mesh(treeGeo, treeMat);
-        tree.position.set(tx, treeH / 2, tz);
-        this.scene.add(tree);
-        chunkData.meshes.push(tree);
+        // Ceramic insulators
+        [-1.1, 0, 1.1].forEach(ix => {
+          const insGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.25, 6);
+          const insMat = new THREE.MeshLambertMaterial({ color: 0x2e4036 });
+          const ins = new THREE.Mesh(insGeo, insMat);
+          ins.position.set(ix, 10.4, 0);
+          poleGroup.add(ins);
+        });
+
+        // Drooping power lines running along Z
+        const cableGeo = new THREE.CylinderGeometry(0.015, 0.015, this.CHUNK_SIZE, 6);
+        cableGeo.rotateX(Math.PI / 2);
+        const cableMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+        const cable = new THREE.Mesh(cableGeo, cableMat);
+        cable.position.set(0, 10.0, 0);
+        poleGroup.add(cable);
+
+        this.scene.add(poleGroup);
+        chunkData.meshes.push(poleGroup);
+      }
+
+      // 4. Repeating Sketchfab highway lights with sodium-vapor illumination.
+      if (Math.abs(cz % 2) === 0) {
+        [-13.7, 13.7].forEach((lightX, index) => {
+          const streetGroup = this.createHighwayLightAsset(
+            centerX + lightX,
+            centerZ,
+            index === 0 ? Math.PI / 2 : -Math.PI / 2
+          ) || this.createProceduralHighwayLight(
+            centerX + lightX,
+            centerZ,
+            index === 0 ? 1 : -1
+          );
+
+          this.scene.add(streetGroup);
+          chunkData.meshes.push(streetGroup);
+
+          const isFailing = prng() < 0.2;
+          const lampX = centerX + (index === 0 ? -10.8 : 10.8);
+          const streetLight = this.lightManager.createFluorescentFixture(lampX, 8.8, centerZ, {
+            color: 0xffa13a,
+            intensity: isFailing ? 1.15 : 2.35,
+            distance: 30.0,
+            isFailing
+          });
+          chunkData.lights.push(streetLight);
+        });
+      }
+
+      // 5. Repeating Highway Mile Marker Posts
+      const markerGroup = new THREE.Group();
+      markerGroup.position.set(centerX + 11.2, 0.5, centerZ + 6.0);
+      const postGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.0, 6);
+      const post = new THREE.Mesh(postGeo, this.materials.metal);
+      markerGroup.add(post);
+
+      const signBoardGeo = new THREE.BoxGeometry(0.4, 0.6, 0.05);
+      const signBoardMat = new THREE.MeshLambertMaterial({ color: 0x0a4020 });
+      const signBoard = new THREE.Mesh(signBoardGeo, signBoardMat);
+      signBoard.position.set(0, 0.35, 0);
+      markerGroup.add(signBoard);
+
+      this.scene.add(markerGroup);
+      chunkData.meshes.push(markerGroup);
+    } else {
+      // 6. Endless desert flanks (cx <= -1 and cx >= 1) — Open walkable void without invisible blocking colliders
+      const desertGround = new THREE.Mesh(
+        new THREE.PlaneGeometry(this.CHUNK_SIZE, this.CHUNK_SIZE),
+        this.materials.desertGround
+      );
+      desertGround.rotation.x = -Math.PI / 2;
+      desertGround.position.set(centerX, -0.03, centerZ);
+      this.scene.add(desertGround);
+      chunkData.meshes.push(desertGround);
+
+      // Keep the full area around and beyond the store 100% collision-free
+      const isGasStationParcel = cx >= 1 && Math.abs(cz + 30) <= 2;
+      const duneCount = isGasStationParcel ? 0 : 2 + Math.floor(prng() * 2);
+      for (let i = 0; i < duneCount; i++) {
+        const dune = new THREE.Mesh(
+          new THREE.SphereGeometry(1, 10, 6),
+          this.materials.desertGround
+        );
+        const duneWidth = 3.5 + prng() * 5.5;
+        dune.scale.set(duneWidth, 0.65 + prng() * 0.8, 2.5 + prng() * 4.0);
+        dune.position.set(
+          centerX + (prng() - 0.5) * 19,
+          -0.45,
+          centerZ + (prng() - 0.5) * 20
+        );
+        dune.rotation.y = prng() * Math.PI;
+        this.scene.add(dune);
+        chunkData.meshes.push(dune);
+      }
+
+      // Visual desert props (rocks / cacti) without extraneous collision boxes
+      const propCount = isGasStationParcel ? 0 : 1 + Math.floor(prng() * 2);
+      for (let i = 0; i < propCount; i++) {
+        const px = centerX + (prng() - 0.5) * 19;
+        const pz = centerZ + (prng() - 0.5) * 20;
+
+        if (prng() > 0.42) {
+          const rock = new THREE.Mesh(
+            new THREE.DodecahedronGeometry(0.7 + prng() * 1.0, 0),
+            this.materials.desertRock
+          );
+          rock.scale.set(1.3 + prng(), 0.55 + prng() * 0.45, 0.9 + prng());
+          rock.position.set(px, 0.45, pz);
+          rock.rotation.set(prng(), prng() * Math.PI, prng() * 0.4);
+          rock.castShadow = false;
+          this.scene.add(rock);
+          chunkData.meshes.push(rock);
+        } else {
+          const cactus = this.createDesertCactus(px, pz, 1.8 + prng() * 2.4);
+          this.scene.add(cactus);
+          chunkData.meshes.push(cactus);
+        }
       }
     }
 
-    // 5. Streetlights / Sodium Vapor Ambience
-    if (cx === 0 && Math.abs(cz % 3) === 0) {
-      const streetLight = this.lightManager.createFluorescentFixture(centerX + 9.5, 8.5, centerZ, {
-        color: 0xffaa44, // Amber sodium-vapor highway tone
-        intensity: 2.2,
-        isFailing: prng() < 0.25
-      });
-      chunkData.lights.push(streetLight);
+    // 7. Landmark: roadside gas station, 720m / about five minutes from spawn.
+    if (cx === 0 && cz === -30) {
+      this.createDesertGasStationLandmark(chunkData, centerZ);
     }
 
-    // 6. Landmark: Abandoned Highway Patrol Cruiser (cx: 0, cz: -3)
-    if (cx === 0 && cz === -3) {
+    // 8. Landmark: Abandoned State Highway Patrol Cruiser (cx: 0, cz: -3)
+    else if (cx === 0 && cz === -3) {
       const policeX = centerX - 6.5;
       const policeZ = centerZ;
       this.createProceduralCar(
         chunkData,
         policeX,
         policeZ,
-        Math.PI / 6,
+        Math.PI / 7,
         'police',
         this.materials.carPaints[0],
         prng
       );
 
-      // Flashing emergency roof strobe light
-      const strobe = new THREE.PointLight(0xff2222, 3.5, 25);
-      strobe.position.set(policeX, 1.8, policeZ);
-      this.scene.add(strobe);
-      chunkData.meshes.push(strobe);
+      // Flashing Emergency Red & Blue Roof Strobes
+      const redStrobe = new THREE.PointLight(0xff1111, 4.0, 30);
+      redStrobe.position.set(policeX - 0.3, 1.85, policeZ);
+      const blueStrobe = new THREE.PointLight(0x1144ff, 3.5, 30);
+      blueStrobe.position.set(policeX + 0.3, 1.85, policeZ);
+      this.scene.add(redStrobe, blueStrobe);
+      chunkData.meshes.push(redStrobe, blueStrobe);
 
-      // Interactive Police Radio recording
+      // Interactive Police Radio Dispatch Tape
       this.createItemPickupToChunk(
         chunkData,
         policeX + 0.8,
@@ -1027,52 +1477,78 @@ export class LevelBuilder {
       );
     }
 
-    // 7. Landmark: Highway Start Overhead Sign (cx: 0, cz: 0)
+    // 9. Landmark: Creepy Overhead Gantry Highway Sign (cx: 0, cz: 0)
     else if (cx === 0 && cz === 0) {
       const signGroup = new THREE.Group();
-      signGroup.position.set(0, 5.5, centerZ);
+      signGroup.position.set(0, 5.8, centerZ);
 
-      // Big green highway sign
-      const boardGeo = new THREE.BoxGeometry(8.0, 2.2, 0.25);
-      const boardMat = new THREE.MeshStandardMaterial({ color: 0x0d4722, roughness: 0.6 });
-      const board = new THREE.Mesh(boardGeo, boardMat);
+      // Big retro green highway sign
+      const boardGeo = new THREE.BoxGeometry(9.0, 2.4, 0.3);
+      const board = new THREE.Mesh(boardGeo, this.materials.highwaySignGreen);
+      board.castShadow = true;
       signGroup.add(board);
 
-      // Gantry support legs
-      const legGeo = new THREE.CylinderGeometry(0.18, 0.18, 6.0, 8);
-      const legMat = new THREE.MeshStandardMaterial({ color: 0x4a555a, metalness: 0.8 });
-      const legL = new THREE.Mesh(legGeo, legMat);
-      legL.position.set(-4.2, -2.5, 0);
-      const legR = new THREE.Mesh(legGeo, legMat);
-      legR.position.set(4.2, -2.5, 0);
-      signGroup.add(legL, legR);
+      // Gantry steel truss legs
+      [-4.6, 4.6].forEach(gx => {
+        const legGeo = new THREE.CylinderGeometry(0.2, 0.2, 6.2, 8);
+        const leg = new THREE.Mesh(legGeo, this.materials.metal);
+        leg.position.set(gx, -2.8, 0);
+        signGroup.add(leg);
+      });
 
       this.scene.add(signGroup);
       chunkData.meshes.push(signGroup);
     }
 
-    // 8. Procedural Abandoned Cars along the Highway
-    else if (cx === 0 && prng() > 0.6) {
+    // 10. Landmark: Eerie Rusted Roadside Billboard (cx: 0, cz: -6)
+    else if (cx === 0 && cz === -6) {
+      const billGroup = new THREE.Group();
+      billGroup.position.set(centerX + 12.0, 0, centerZ);
+
+      // Billboard panel
+      const panelGeo = new THREE.BoxGeometry(8.0, 4.0, 0.3);
+      const panelMat = new THREE.MeshStandardMaterial({ color: 0x221a14, roughness: 0.9 });
+      const panel = new THREE.Mesh(panelGeo, panelMat);
+      panel.position.set(0, 6.0, 0);
+      panel.rotation.y = -Math.PI / 8;
+      billGroup.add(panel);
+
+      // Support stilts
+      [-3.0, 3.0].forEach(sx => {
+        const stiltGeo = new THREE.CylinderGeometry(0.2, 0.25, 7.0, 6);
+        const stilt = new THREE.Mesh(stiltGeo, this.materials.treeBark);
+        stilt.position.set(sx, 3.5, 0);
+        billGroup.add(stilt);
+      });
+
+      this.scene.add(billGroup);
+      chunkData.meshes.push(billGroup);
+    }
+
+    // 11. Procedural Abandoned Civilian Cars along Highway Shoulder
+    else if (cx === 0 && prng() > 0.55) {
       const side = prng() > 0.5 ? 1 : -1;
-      const carX = centerX + side * (6.0 + prng() * 2.0);
-      const carZ = centerZ + (prng() - 0.5) * 12.0;
+      const carX = centerX + side * (6.0 + prng() * 1.5);
+      const carZ = centerZ + (prng() - 0.5) * 14.0;
       const carType = prng() > 0.6 ? 'muscle' : (prng() > 0.3 ? 'taxi' : 'sedan');
       const paintIdx = Math.floor(prng() * this.materials.carPaints.length);
+      const slightAngle = (prng() - 0.5) * 0.4 + (side > 0 ? 0 : Math.PI);
+
       this.createProceduralCar(
         chunkData,
         carX,
         carZ,
-        (prng() - 0.5) * 0.4 + (side > 0 ? 0 : Math.PI),
+        slightAngle,
         carType,
         this.materials.carPaints[paintIdx],
         prng
       );
     }
 
-    // 9. Scattered Supply Drops
-    if (prng() > 0.4) {
-      const sx = centerX + (prng() - 0.5) * 14.0;
-      const sz = centerZ + (prng() - 0.5) * 18.0;
+    // 12. Roadside Survival Items
+    if (prng() > 0.45) {
+      const sx = centerX + (prng() > 0.5 ? 11.0 : -11.0) + (prng() - 0.5) * 1.0;
+      const sz = centerZ + (prng() - 0.5) * 16.0;
       const itemRoll = prng();
       const itemType = itemRoll > 0.6 ? 'battery' : (itemRoll > 0.3 ? 'almond_water' : 'medkit');
       const itemName = itemType === 'battery' ? 'Flashlight Alkaline Battery' : (itemType === 'almond_water' ? 'Unmarked Bottle ("Almond Water")' : 'Emergency First Aid Kit');
@@ -1082,56 +1558,486 @@ export class LevelBuilder {
     this.activeChunks.set(key, chunkData);
   }
 
+  createDesertGasStationLandmark(chunkData, centerZ) {
+    // 1. Asphalt Forecourt Slab
+    const forecourt = new THREE.Mesh(
+      new THREE.PlaneGeometry(28, 28),
+      new THREE.MeshPhongMaterial({ color: 0x242628, shininess: 3 })
+    );
+    forecourt.rotation.x = -Math.PI / 2;
+    forecourt.position.set(24.0, 0.015, centerZ);
+    forecourt.receiveShadow = true;
+    this.scene.add(forecourt);
+    chunkData.meshes.push(forecourt);
+
+    // 2. Scaled-up Full-Scale Gas Station + 24-Hour Store Landmark (28m x 7.5m x 24m)
+    const stationX = 25.0;
+    const stationZ = centerZ;
+    const gasStation = this.createFittedRoadsideAsset(
+      this.desertGasStationModel,
+      stationX,
+      stationZ,
+      28.0,
+      7.5,
+      24.0,
+      -Math.PI / 2
+    ) || this.createProceduralGasStation(stationX, stationZ);
+    this.scene.add(gasStation);
+    chunkData.meshes.push(gasStation);
+
+    // 3. Interior Store Checkout Counter & Tape Placement
+    const tapeX = stationX + 2.5;
+    const tapeZ = stationZ + 1.2;
+    const tapeDisplay = new THREE.Group();
+    tapeDisplay.position.set(tapeX, 0, tapeZ);
+
+    const displayBase = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, 0.84, 0.8),
+      new THREE.MeshPhongMaterial({ color: 0x483526, shininess: 8 })
+    );
+    displayBase.position.y = 0.42;
+    tapeDisplay.add(displayBase);
+
+    const displayTop = new THREE.Mesh(
+      new THREE.BoxGeometry(1.35, 0.08, 0.95),
+      new THREE.MeshPhongMaterial({ color: 0x766048, shininess: 18 })
+    );
+    displayTop.position.y = 0.88;
+    tapeDisplay.add(displayTop);
+
+    // Overhead warm interior inspection spotlight
+    const tapeLight = new THREE.PointLight(0xffbd67, 1.6, 7.0, 1.2);
+    tapeLight.position.y = 2.4;
+    tapeDisplay.add(tapeLight);
+
+    this.scene.add(tapeDisplay);
+    chunkData.meshes.push(tapeDisplay);
+
+    // Dr. Samuel Reed's Audio Cassette Tape resting prominently on the counter
+    this.createItemPickupToChunk(
+      chunkData,
+      tapeX,
+      0.95,
+      tapeZ,
+      'highway_reed_store_tape',
+      'Dr. Samuel Reed Roadside Store Recording'
+    );
+
+    // 4. Large Vintage "LAST STOP: GAS / FOOD" Roadside Neon Pole Sign
+    const signCanvas = document.createElement('canvas');
+    signCanvas.width = 384;
+    signCanvas.height = 224;
+    const ctx = signCanvas.getContext('2d');
+    ctx.fillStyle = '#7d1f17';
+    ctx.fillRect(0, 0, signCanvas.width, signCanvas.height);
+    ctx.strokeStyle = '#e7d8ac';
+    ctx.lineWidth = 14;
+    ctx.strokeRect(12, 12, signCanvas.width - 24, signCanvas.height - 24);
+    ctx.fillStyle = '#f1dfae';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 70px monospace';
+    ctx.fillText('LAST STOP', 192, 94);
+    ctx.font = 'bold 45px monospace';
+    ctx.fillText('GAS  FOOD', 192, 166);
+    const signTexture = new THREE.CanvasTexture(signCanvas);
+
+    const sign = new THREE.Group();
+    sign.position.set(14.5, 0, centerZ + 8.5);
+    const signPole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.14, 0.18, 7.0, 8),
+      this.materials.metal
+    );
+    signPole.position.y = 3.5;
+    sign.add(signPole);
+    const signBoard = new THREE.Mesh(
+      new THREE.BoxGeometry(3.6, 2.2, 0.22),
+      new THREE.MeshBasicMaterial({ map: signTexture })
+    );
+    signBoard.position.y = 6.8;
+    signBoard.rotation.y = Math.PI / 2;
+    sign.add(signBoard);
+    this.scene.add(sign);
+    chunkData.meshes.push(sign);
+
+    // 5. Accurate Building & Canopy Colliders
+    gasStation.updateMatrixWorld(true);
+    const stationBounds = new THREE.Box3().setFromObject(gasStation);
+    const bMinX = stationBounds.min.x;
+    const bMaxX = stationBounds.max.x;
+    const bMinZ = stationBounds.min.z;
+    const bMaxZ = stationBounds.max.z;
+    const bHeight = Math.max(5.5, stationBounds.max.y);
+    const wallThick = 0.85;
+
+    // Building exterior walls (leaving the front customer entrance open)
+    const storeWallColliders = [
+      // East (Rear) Building Wall
+      new THREE.Box3(
+        new THREE.Vector3(bMaxX - wallThick, 0, bMinZ - 0.2),
+        new THREE.Vector3(bMaxX + wallThick, bHeight + 2.0, bMaxZ + 0.2)
+      ),
+      // North Wall
+      new THREE.Box3(
+        new THREE.Vector3(stationX - 0.2, 0, bMinZ - wallThick),
+        new THREE.Vector3(bMaxX + 0.2, bHeight + 2.0, bMinZ + wallThick)
+      ),
+      // South Wall
+      new THREE.Box3(
+        new THREE.Vector3(stationX - 0.2, 0, bMaxZ - wallThick),
+        new THREE.Vector3(bMaxX + 0.2, bHeight + 2.0, bMaxZ + wallThick)
+      ),
+      // Front Wall - Left Section
+      new THREE.Box3(
+        new THREE.Vector3(stationX - wallThick, 0, bMinZ - 0.2),
+        new THREE.Vector3(stationX + wallThick, bHeight + 2.0, stationZ - 1.5)
+      ),
+      // Front Wall - Right Section
+      new THREE.Box3(
+        new THREE.Vector3(stationX - wallThick, 0, stationZ + 1.5),
+        new THREE.Vector3(stationX + wallThick, bHeight + 2.0, bMaxZ + 0.2)
+      )
+    ];
+
+    storeWallColliders.forEach((collider) => {
+      collider.collisionRole = 'store_wall';
+      this.registerCollider(collider);
+      chunkData.colliders.push(collider);
+    });
+
+    // Gas Pump Island Colliders (along X: 18.5..20.5)
+    [-4.5, 4.5].forEach((pzOffset) => {
+      const pumpCollider = new THREE.Box3(
+        new THREE.Vector3(18.5, 0, centerZ + pzOffset - 0.8),
+        new THREE.Vector3(20.5, 2.2, centerZ + pzOffset + 0.8)
+      );
+      this.registerCollider(pumpCollider);
+      chunkData.colliders.push(pumpCollider);
+    });
+
+    // 6. Overhead Gas Station Canopy Illumination
+    [centerZ - 5.5, centerZ + 5.5].forEach((z, index) => {
+      const fixture = this.lightManager.createFluorescentFixture(19.5, 5.2, z, {
+        color: 0xffd27a,
+        intensity: index === 0 ? 2.5 : 2.0,
+        distance: 28,
+        isFailing: index === 1
+      });
+      chunkData.lights.push(fixture);
+    });
+  }
+
+  createFittedRoadsideAsset(source, x, z, maxWidth, maxHeight, maxDepth, rotationY = 0) {
+    if (!source) return null;
+
+    const clone = source.clone(true);
+    clone.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = false;
+        child.receiveShadow = true;
+      }
+    });
+
+    const oriented = new THREE.Group();
+    oriented.rotation.y = rotationY;
+    oriented.add(clone);
+    oriented.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(oriented);
+    const size = box.getSize(new THREE.Vector3());
+    if (size.x <= 0.0001 || size.y <= 0.0001 || size.z <= 0.0001) return null;
+
+    const center = box.getCenter(new THREE.Vector3());
+    oriented.position.set(-center.x, -box.min.y, -center.z);
+
+    const wrapper = new THREE.Group();
+    wrapper.add(oriented);
+    wrapper.scale.setScalar(Math.min(maxWidth / size.x, maxHeight / size.y, maxDepth / size.z));
+    wrapper.position.set(x, 0.025, z);
+    return wrapper;
+  }
+
+  createProceduralGasStation(x, z) {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    const concrete = new THREE.MeshPhongMaterial({ color: 0xb6aa8e, shininess: 4 });
+    const red = new THREE.MeshPhongMaterial({ color: 0x7d1f17, shininess: 12 });
+    const wall = new THREE.MeshPhongMaterial({ color: 0xc5b797, shininess: 3 });
+
+    // Canopy
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(16, 0.55, 12), concrete);
+    canopy.position.set(-5.0, 5.2, 0);
+    group.add(canopy);
+    const fascia = new THREE.Mesh(new THREE.BoxGeometry(16.2, 0.6, 12.2), red);
+    fascia.position.set(-5.0, 5.4, 0);
+    group.add(fascia);
+
+    // Columns
+    [-10.0, 0.0].forEach((px) => {
+      [-4.5, 4.5].forEach((pz) => {
+        const column = new THREE.Mesh(new THREE.BoxGeometry(0.35, 5.0, 0.35), concrete);
+        column.position.set(px, 2.5, pz);
+        group.add(column);
+      });
+    });
+
+    // Pumps
+    [-3.5, 3.5].forEach((pz) => {
+      const pump = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.8, 0.9), red);
+      pump.position.set(-5.0, 0.9, pz);
+      group.add(pump);
+    });
+
+    // Integrated Rear Store Building
+    const building = new THREE.Mesh(new THREE.BoxGeometry(12, 5.0, 16), wall);
+    building.position.set(5.0, 2.5, 0);
+    group.add(building);
+
+    return group;
+  }
+
+  createFittedHighwayRoadAsset(x, z, rotationY = 0) {
+    if (!this.highwayRoadModel) return null;
+
+    const clone = this.highwayRoadModel.clone(true);
+    clone.traverse((child) => {
+      if (child.isMesh) {
+        child.receiveShadow = true;
+        child.castShadow = false;
+      }
+    });
+
+    const oriented = new THREE.Group();
+    oriented.rotation.y = rotationY;
+    oriented.add(clone);
+    oriented.updateMatrixWorld(true);
+
+    let box = new THREE.Box3().setFromObject(oriented);
+    let size = box.getSize(new THREE.Vector3());
+    if (size.x > size.z) {
+      oriented.rotation.y += Math.PI / 2;
+      oriented.updateMatrixWorld(true);
+      box = new THREE.Box3().setFromObject(oriented);
+      size = box.getSize(new THREE.Vector3());
+    }
+    if (size.x <= 0.0001 || size.z <= 0.0001) return null;
+
+    const center = box.getCenter(new THREE.Vector3());
+    oriented.position.set(-center.x, -box.min.y, -center.z);
+
+    const wrapper = new THREE.Group();
+    wrapper.add(oriented);
+    const widthScale = 11.7 / size.x;
+    const lengthScale = this.CHUNK_SIZE / size.z;
+    wrapper.scale.set(widthScale, Math.min(widthScale, lengthScale), lengthScale);
+    wrapper.position.set(x, 0.025, z);
+    return wrapper;
+  }
+
+  createHighwayLightAsset(x, z, rotationY = 0) {
+    if (!this.highwayLightModel) return null;
+
+    this.highwayLightModel.updateWorldMatrix(true, true);
+    const clone = this.highwayLightModel.clone(true);
+    this.highwayLightModel.matrixWorld.decompose(clone.position, clone.quaternion, clone.scale);
+    clone.updateMatrixWorld(true);
+
+    const initialBox = new THREE.Box3().setFromObject(clone);
+    const initialSize = initialBox.getSize(new THREE.Vector3());
+    if (initialSize.y <= 0.0001) return null;
+
+    clone.scale.multiplyScalar(9.5 / initialSize.y);
+    clone.updateMatrixWorld(true);
+    const scaledBox = new THREE.Box3().setFromObject(clone);
+    const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
+    clone.position.x -= scaledCenter.x;
+    clone.position.y -= scaledBox.min.y;
+    clone.position.z -= scaledCenter.z;
+    clone.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = false;
+        child.receiveShadow = true;
+      }
+    });
+
+    const wrapper = new THREE.Group();
+    wrapper.position.set(x, 0, z);
+    wrapper.rotation.y = rotationY;
+    wrapper.add(clone);
+    return wrapper;
+  }
+
+  createProceduralHighwayLight(x, z, roadDirection) {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+
+    const poleHeight = 9.0;
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.16, poleHeight, 8),
+      this.materials.metal
+    );
+    pole.position.y = poleHeight / 2;
+    group.add(pole);
+
+    const arm = new THREE.Mesh(
+      new THREE.BoxGeometry(2.7, 0.12, 0.12),
+      this.materials.metal
+    );
+    arm.position.set(roadDirection * 1.3, 8.8, 0);
+    group.add(arm);
+
+    const lamp = new THREE.Mesh(
+      new THREE.BoxGeometry(0.75, 0.22, 0.4),
+      this.materials.exitSignHousing
+    );
+    lamp.position.set(roadDirection * 2.55, 8.7, 0);
+    group.add(lamp);
+    return group;
+  }
+
+  createDesertCactus(x, z, height) {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.26, height, 8),
+      this.materials.cactus
+    );
+    trunk.position.y = height / 2;
+    trunk.castShadow = false;
+    group.add(trunk);
+
+    [-1, 1].forEach((side, index) => {
+      const armHeight = height * (index === 0 ? 0.42 : 0.32);
+      const arm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.1, 0.13, armHeight, 7),
+        this.materials.cactus
+      );
+      arm.position.set(side * 0.38, height * (index === 0 ? 0.52 : 0.65), 0);
+      group.add(arm);
+
+      const connector = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.1, 0.12, 0.55, 7),
+        this.materials.cactus
+      );
+      connector.rotation.z = Math.PI / 2;
+      connector.position.set(side * 0.22, arm.position.y - armHeight / 2 + 0.08, 0);
+      group.add(connector);
+    });
+
+    return group;
+  }
+
   // =========================================================================
   // LEVEL 1: PROCEDURAL CHUNKS & STORY LANDMARKS
   // =========================================================================
-  // Deterministic Macro-Partition System for Small, Medium, Large, and Extra-Large Connected Rooms
-  getRoomId(gx, gz) {
-    const MB = 8; // Macro block size: 8x8 cells (32m x 32m)
+  // Deterministic, seedable hash -> [0, 1). Same inputs always produce the same output for a
+  // given this.levelSeed, so two chunks that both query the same cell always agree.
+  hashF(a, b, c, d) {
+    const s = Math.sin(a * 127.1 + b * 311.7 + c * 74.7 + d * 269.5 + this.levelSeed * 0.6180339887) * 43758.5453;
+    return s - Math.floor(s);
+  }
+
+  // Room-region assignment via seeded multi-source weighted flood-fill (a "grassfire"
+  // transform), computed once per macro block (8x8 cells = 32m x 32m) and cached. K seed
+  // rooms claim the block's 64 cells by expanding outward one step at a time, cheapest
+  // cumulative distance first; a cell can ONLY be claimed by spreading from an already-claimed
+  // neighboring cell of that same region. That is what makes every region a single connected
+  // blob *by construction* -- there is no distance formula that could ever hand an isolated,
+  // disconnected pocket of cells to a region several rooms away, the way naive nearest-seed
+  // Voronoi can. (Weighted Euclidean-distance Voronoi was tried first and empirically produced
+  // exactly that kind of fragmentation -- small orphaned islands walled off from their own
+  // room -- which is what reads in-game as a wall connected to nothing.)
+  //
+  // Because this whole computation is a pure function of (this.levelSeed, mbx, mbz) with no
+  // external/mutable state, any two chunks that border each other independently compute an
+  // identical region grid for the macro block(s) they share -- so a wall is placed on a
+  // boundary if and only if both sides agree the regions differ, which is what guarantees zero
+  // gaps (neighbors never disagree about an edge) on top of zero fragmentation.
+  getMacroBlockRegions(mbx, mbz) {
+    const key = `${mbx}_${mbz}`;
+    const cached = this.regionCache.get(key);
+    if (cached) return cached;
+
+    const MB = 8;
+    const K = 3 + Math.floor(this.hashF(mbx, mbz, 91.7, 0) * 4); // 3..6 rooms per block
+
+    // Two seed rolls can legitimately hash to the same integer cell (only 64 cells, up to 6
+    // draws) -- if that happens, skip the duplicate. Two ids racing to expand from the exact
+    // same origin cell is what actually caused the fragmentation empirically observed while
+    // developing this: their near-identical distances tie-break unpredictably cell by cell,
+    // interleaving both ids into scattered patches instead of clean regions.
+    const seedX = [], seedZ = [], weight = [];
+    const usedCoords = new Set();
+    for (let k = 0; k < K; k++) {
+      const sx = Math.min(MB - 1, Math.floor(this.hashF(mbx, mbz, k, 1) * MB));
+      const sz = Math.min(MB - 1, Math.floor(this.hashF(mbx, mbz, k, 2) * MB));
+      const coordKey = `${sx}_${sz}`;
+      if (usedCoords.has(coordKey)) continue;
+      usedCoords.add(coordKey);
+      seedX.push(sx);
+      seedZ.push(sz);
+      weight.push(0.6 + this.hashF(mbx, mbz, k, 3) * 0.8); // 0.6..1.4 -> varied room sizes
+    }
+    const actualK = seedX.length;
+
+    const owner = [];
+    const dist = [];
+    for (let x = 0; x < MB; x++) {
+      owner.push(new Array(MB).fill(-1));
+      dist.push(new Array(MB).fill(Infinity));
+    }
+
+    let frontier = [];
+    for (let k = 0; k < actualK; k++) {
+      owner[seedX[k]][seedZ[k]] = k;
+      dist[seedX[k]][seedZ[k]] = 0;
+      frontier.push({ x: seedX[k], z: seedZ[k], id: k, d: 0 });
+    }
+
+    // Multi-source Dijkstra with lazy deletion: always expand the globally cheapest frontier
+    // entry next (true shortest-path order, not just "some" order), and discard stale entries
+    // whose cell was already claimed more cheaply by a different room in the meantime -- without
+    // that check, a stale entry could keep propagating an outdated/overwritten id.
+    const STEPS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    while (frontier.length > 0) {
+      let bestI = 0;
+      for (let i = 1; i < frontier.length; i++) {
+        if (frontier[i].d < frontier[bestI].d) bestI = i;
+      }
+      const cur = frontier.splice(bestI, 1)[0];
+      if (cur.d > dist[cur.x][cur.z]) continue; // stale: a cheaper claim already won this cell
+      const stepCost = 1.0 / weight[cur.id]; // heavier-weighted rooms expand cheaper => bigger
+
+      for (const [dx, dz] of STEPS) {
+        const nx = cur.x + dx, nz = cur.z + dz;
+        if (nx < 0 || nx >= MB || nz < 0 || nz >= MB) continue;
+        const nd = cur.d + stepCost;
+        if (nd < dist[nx][nz]) {
+          dist[nx][nz] = nd;
+          owner[nx][nz] = cur.id;
+          frontier.push({ x: nx, z: nz, id: cur.id, d: nd });
+        }
+      }
+    }
+
+    const block = { owner, weight };
+    this.regionCache.set(key, block);
+    return block;
+  }
+
+  getRoomInfo(gx, gz) {
+    const MB = 8;
     const mbx = Math.floor(gx / MB);
     const mbz = Math.floor(gz / MB);
-    const lx = ((gx % MB) + MB) % MB; // 0..7
-    const lz = ((gz % MB) + MB) % MB; // 0..7
+    const lx = ((gx % MB) + MB) % MB;
+    const lz = ((gz % MB) + MB) % MB;
 
-    // Deterministic seed per macro block
-    const s = Math.abs(Math.sin(mbx * 127.1 + mbz * 311.7 + 42.0) * 43758.5453);
-    const template = Math.floor(s * 1000) % 4;
+    const block = this.getMacroBlockRegions(mbx, mbz);
+    const regionIdx = block.owner[lx][lz];
+    return { id: `${mbx}_${mbz}_R${regionIdx}`, weight: block.weight[regionIdx] };
+  }
 
-    if (template === 0) {
-      // Template 0: 1 Extra-Large Room (4x4), 1 Large Room (3x3), 2 Medium Rooms (2x2), Small Rooms
-      if (lx < 4 && lz < 4) return `${mbx}_${mbz}_XL_0`;
-      if (lx >= 5 && lz >= 5) return `${mbx}_${mbz}_L_0`;
-      if (lx >= 4 && lz < 2) return `${mbx}_${mbz}_M_0`;
-      if (lx >= 4 && lz >= 2 && lz < 4) return `${mbx}_${mbz}_M_1`;
-      if (lx < 3 && lz >= 5) return `${mbx}_${mbz}_L_1`;
-      if (lx < 4 && lz >= 4 && lz < 6) return `${mbx}_${mbz}_M_2`;
-      return `${mbx}_${mbz}_S_${lx}_${lz}`;
-    } else if (template === 1) {
-      // Template 1: 2 Large Rooms (3x3), 4 Medium Rooms (2x2), Small Rooms
-      if (lx < 3 && lz < 3) return `${mbx}_${mbz}_L_0`;
-      if (lx >= 5 && lz < 3) return `${mbx}_${mbz}_L_1`;
-      if (lx >= 3 && lx < 5 && lz < 2) return `${mbx}_${mbz}_M_0`;
-      if (lx < 4 && lz >= 4 && lz < 6) return `${mbx}_${mbz}_M_1`;
-      if (lx >= 4 && lz >= 4 && lz < 6) return `${mbx}_${mbz}_M_2`;
-      if (lx >= 4 && lz >= 6) return `${mbx}_${mbz}_M_3`;
-      if (lx < 4 && lz >= 6) return `${mbx}_${mbz}_M_4`;
-      return `${mbx}_${mbz}_S_${lx}_${lz}`;
-    } else if (template === 2) {
-      // Template 2: Center Extra-Large Room (4x4: lx 2..5, lz 2..5), surrounding Medium & Small Rooms
-      if (lx >= 2 && lx <= 5 && lz >= 2 && lz <= 5) return `${mbx}_${mbz}_XL_0`;
-      if (lx < 2 && lz < 4) return `${mbx}_${mbz}_M_0`;
-      if (lx > 5 && lz < 4) return `${mbx}_${mbz}_M_1`;
-      if (lx < 2 && lz >= 4) return `${mbx}_${mbz}_M_2`;
-      if (lx > 5 && lz >= 4) return `${mbx}_${mbz}_M_3`;
-      if (lz < 2) return `${mbx}_${mbz}_M_4_${Math.floor(lx / 2)}`;
-      return `${mbx}_${mbz}_S_${lx}_${lz}`;
-    } else {
-      // Template 3: 2 Extra-Large Rooms (4x4), 4 Medium Rooms (2x2)
-      if (lx < 4 && lz < 4) return `${mbx}_${mbz}_XL_0`;
-      if (lx >= 4 && lz >= 4) return `${mbx}_${mbz}_XL_1`;
-      if (lx >= 4 && lz < 4) return `${mbx}_${mbz}_M_0_${Math.floor((lx - 4) / 2)}_${Math.floor(lz / 2)}`;
-      return `${mbx}_${mbz}_M_1_${Math.floor(lx / 2)}_${Math.floor((lz - 4) / 2)}`;
-    }
+  getRoomId(gx, gz) {
+    return this.getRoomInfo(gx, gz).id;
   }
 
   // Determine if a horizontal wall segment between (gx, gz) and (gx, gz - 1) is the single doorway opening
@@ -1352,18 +2258,31 @@ export class LevelBuilder {
           }
         }
 
-        const isLargeRoom = currentRoom.includes('_L_') || currentRoom.includes('_XL_');
+        const isLargeRoom = this.getRoomInfo(gx, gz).weight > 1.0;
 
         // Short freestanding partitions create alcoves without closing the room's long sightlines.
+        // Every stub must be flush against a real wall corner on at least one end -- if neither
+        // corner of its candidate edge has an adjacent wall to anchor to, it is skipped rather
+        // than floating disconnected in open space.
         if (isLargeRoom && currentRoom === northRoom && globalHash(gx, gz, 727) > 0.9) {
-          const stubLength = 1.5 + globalHash(gx, gz, 728) * 1.1;
-          const offset = (globalHash(gx, gz, 729) - 0.5) * (cellSize - stubLength);
-          this.addSolidWallToChunk(chunkData, cellCenterX + offset, wallHeight / 2, minZ + r * cellSize, stubLength, wallHeight, 0.3, this.materials.wallpaper);
+          const stubLength = Math.min(cellSize, 1.5 + globalHash(gx, gz, 728) * 1.1);
+          const westAnchor = currentRoom !== westRoom;
+          const eastAnchor = currentRoom !== this.getRoomId(gx + 1, gz);
+          if (westAnchor) {
+            this.addSolidWallToChunk(chunkData, (minX + c * cellSize) + stubLength / 2, wallHeight / 2, minZ + r * cellSize, stubLength, wallHeight, 0.3, this.materials.wallpaper);
+          } else if (eastAnchor) {
+            this.addSolidWallToChunk(chunkData, (minX + (c + 1) * cellSize) - stubLength / 2, wallHeight / 2, minZ + r * cellSize, stubLength, wallHeight, 0.3, this.materials.wallpaper);
+          }
         }
         if (isLargeRoom && currentRoom === westRoom && globalHash(gx, gz, 737) > 0.9) {
-          const stubLength = 1.5 + globalHash(gx, gz, 738) * 1.1;
-          const offset = (globalHash(gx, gz, 739) - 0.5) * (cellSize - stubLength);
-          this.addSolidWallToChunk(chunkData, minX + c * cellSize, wallHeight / 2, cellCenterZ + offset, 0.3, wallHeight, stubLength, this.materials.wallpaper);
+          const stubLength = Math.min(cellSize, 1.5 + globalHash(gx, gz, 738) * 1.1);
+          const northAnchor = currentRoom !== northRoom;
+          const southAnchor = currentRoom !== this.getRoomId(gx, gz + 1);
+          if (northAnchor) {
+            this.addSolidWallToChunk(chunkData, minX + c * cellSize, wallHeight / 2, (minZ + r * cellSize) + stubLength / 2, 0.3, wallHeight, stubLength, this.materials.wallpaper);
+          } else if (southAnchor) {
+            this.addSolidWallToChunk(chunkData, minX + c * cellSize, wallHeight / 2, (minZ + (r + 1) * cellSize) - stubLength / 2, 0.3, wallHeight, stubLength, this.materials.wallpaper);
+          }
         }
 
         // Repeated square columns anchor the larger chambers without making a uniform office grid.
@@ -1399,15 +2318,33 @@ export class LevelBuilder {
     });
 
     // 5. Random Supply Pickup Scatters (Frequent 1980s supply drops)
+    // Survival Mode gates this with a day/night-cycle-driven scarcity multiplier. The multiplier
+    // itself DECREASES with cycle number (1.00 down toward a 0.10 floor), matching the design
+    // doc's "Base Spawn Chance x Difficulty Multiplier" formula, so it must scale the spawn
+    // CHANCE directly, not the threshold: baseline spawn chance is (1 - 0.35) = 0.65 at cycle 1
+    // (multiplier 1.0, reproducing story mode's exact rate), and a lower multiplier raises the
+    // threshold so fewer chunks roll a drop as a run goes on.
     const itemRoll = prng();
-    if (itemRoll > 0.35) {
+    const scarcityMultiplier = this.survivalMode ? (this.survivalScarcityMultiplier || 1.0) : 1.0;
+    const spawnThreshold = this.survivalMode ? (1.0 - 0.65 * scarcityMultiplier) : 0.35;
+    if (itemRoll > spawnThreshold) {
       const dropCount = (itemRoll > 0.8) ? 3 : ((itemRoll > 0.55) ? 2 : 1);
       for (let i = 0; i < dropCount; i++) {
         const sx = minX + 3.0 + prng() * 18.0;
         const sz = minZ + 3.0 + prng() * 18.0;
         const roll = prng();
-        const type = roll > 0.6 ? 'battery' : (roll > 0.28 ? 'almond_water' : 'medkit');
-        const name = type === 'battery' ? 'Flashlight Alkaline Battery' : (type === 'almond_water' ? 'Unmarked Bottle ("Almond Water")' : 'Emergency First Aid Kit');
+        let type, name;
+        if (this.survivalMode) {
+          // Wider Survival Mode pool: battery / almond_water / medkit / ration_pack / canteen_water
+          if (roll > 0.75) { type = 'battery'; name = 'Flashlight Alkaline Battery'; }
+          else if (roll > 0.55) { type = 'almond_water'; name = 'Unmarked Bottle ("Almond Water")'; }
+          else if (roll > 0.4) { type = 'medkit'; name = 'Emergency First Aid Kit'; }
+          else if (roll > 0.2) { type = 'ration_pack'; name = 'DSA Field Ration Pack'; }
+          else { type = 'canteen_water'; name = 'Military Canteen'; }
+        } else {
+          type = roll > 0.6 ? 'battery' : (roll > 0.28 ? 'almond_water' : 'medkit');
+          name = type === 'battery' ? 'Flashlight Alkaline Battery' : (type === 'almond_water' ? 'Unmarked Bottle ("Almond Water")' : 'Emergency First Aid Kit');
+        }
         this.createItemPickupToChunk(chunkData, sx, 0.05, sz, type, name);
       }
     }
@@ -1436,7 +2373,14 @@ export class LevelBuilder {
     // Outer Room Walls
     this.addSolidWallToChunk(chunkData, -w / 2, h / 2, 20, 0.4, h, l, this.materials.labWall);
     this.addSolidWallToChunk(chunkData, w / 2, h / 2, 20, 0.4, h, l, this.materials.labWall);
-    this.addSolidWallToChunk(chunkData, 0, h / 2, 20 + l / 2, w, h, 0.4, this.materials.labWall);
+
+    // Rear wall opens into the Level 5 laboratory through the security airlock.
+    const securityDoorWidth = 1.8;
+    const rearWallZ = 20 + l / 2;
+    const rearSegmentWidth = (w - securityDoorWidth) / 2;
+    this.addSolidWallToChunk(chunkData, -(securityDoorWidth + rearSegmentWidth) / 2, h / 2, rearWallZ, rearSegmentWidth, h, 0.4, this.materials.labWall);
+    this.addSolidWallToChunk(chunkData, (securityDoorWidth + rearSegmentWidth) / 2, h / 2, rearWallZ, rearSegmentWidth, h, 0.4, this.materials.labWall);
+    this.addSolidWallToChunk(chunkData, 0, 2.85, rearWallZ, securityDoorWidth, 0.7, 0.4, this.materials.labWall);
 
     // Front Wall with Gateway Entrance
     this.addSolidWallToChunk(chunkData, -3.6, h / 2, 13.0, 4.8, h, 0.4, this.materials.labWall);
@@ -1547,7 +2491,7 @@ export class LevelBuilder {
       name: 'Mainframe Terminal [DTE-04 TELEMETRY]',
       action: 'examine_computer'
     };
-    this.interactiveObjects.push(compItem);
+    this.pushInteractive(compItem);
     chunkData.interactive.push(compItem);
 
     // --- DECORATIONS: SERVER RACK UNITS ---
@@ -1573,30 +2517,42 @@ export class LevelBuilder {
     });
 
     // --- SECOND DOOR: LOCKED FACILITY ACCESS DOOR ---
-    const secDoorFrameGeo = new THREE.BoxGeometry(1.8, 2.5, 0.4);
-    const secDoorFrame = new THREE.Mesh(secDoorFrameGeo, this.materials.metal);
-    secDoorFrame.position.set(0, 1.25, 20 + l / 2 - 0.1);
+    const secDoorFrame = new THREE.Group();
+    const framePostGeo = new THREE.BoxGeometry(0.2, 2.5, 0.4);
+    const frameBeamGeo = new THREE.BoxGeometry(securityDoorWidth, 0.2, 0.4);
+    const leftFramePost = new THREE.Mesh(framePostGeo, this.materials.metal);
+    leftFramePost.position.set(-0.8, 1.25, 0);
+    const rightFramePost = new THREE.Mesh(framePostGeo, this.materials.metal);
+    rightFramePost.position.set(0.8, 1.25, 0);
+    const frameBeam = new THREE.Mesh(frameBeamGeo, this.materials.metal);
+    frameBeam.position.set(0, 2.4, 0);
+    secDoorFrame.add(leftFramePost, rightFramePost, frameBeam);
+    secDoorFrame.position.set(0, 0, rearWallZ - 0.1);
     this.scene.add(secDoorFrame);
     chunkData.meshes.push(secDoorFrame);
 
     const secDoorPanelGeo = new THREE.BoxGeometry(1.4, 2.3, 0.15);
     const secDoorPanel = new THREE.Mesh(secDoorPanelGeo, this.materials.steelDoor);
-    secDoorPanel.position.set(0, 1.15, 20 + l / 2 - 0.1);
+    secDoorPanel.position.set(0, 1.15, rearWallZ - 0.1);
     this.scene.add(secDoorPanel);
     chunkData.meshes.push(secDoorPanel);
+
+    const secDoorCollider = new THREE.Box3().setFromObject(secDoorPanel);
+    this.registerCollider(secDoorCollider);
+    chunkData.colliders.push(secDoorCollider);
 
     // Electronic Keypad Next to Door
     const keypadGeo = new THREE.BoxGeometry(0.18, 0.3, 0.08);
     const keypadMat = new THREE.MeshPhongMaterial({ color: 0x1a1a1a });
     const keypad = new THREE.Mesh(keypadGeo, keypadMat);
-    keypad.position.set(1.1, 1.4, 20 + l / 2 - 0.15);
+    keypad.position.set(1.1, 1.4, rearWallZ - 0.15);
     this.scene.add(keypad);
     chunkData.meshes.push(keypad);
 
     const keyLedGeo = new THREE.CircleGeometry(0.02, 8);
     const keyLedMat = new THREE.MeshBasicMaterial({ color: 0xff2222 }); // Red locked LED
     const keyLed = new THREE.Mesh(keyLedGeo, keyLedMat);
-    keyLed.position.set(1.1, 1.48, 20 + l / 2 - 0.2);
+    keyLed.position.set(1.1, 1.48, rearWallZ - 0.2);
     keyLed.rotation.y = Math.PI;
     this.scene.add(keyLed);
     chunkData.meshes.push(keyLed);
@@ -1607,10 +2563,66 @@ export class LevelBuilder {
       name: 'Security Airlock Door [ACCESS RESTRICTED - CLEARANCE LEVEL 5]',
       action: 'try_locked_door',
       unlocked: false,
-      keyLedMaterial: keyLedMat
+      keyLedMaterial: keyLedMat,
+      doorCollider: secDoorCollider
     };
-    this.interactiveObjects.push(lockedDoorItem);
+    this.pushInteractive(lockedDoorItem);
     chunkData.interactive.push(lockedDoorItem);
+
+    // --- LARGE DEPARTMENT OF SPATIAL ANOMALY SEAL ON REAR WALL ---
+    const sealTexLoader = new THREE.TextureLoader();
+    const sealTexture = sealTexLoader.load('./assets/textures/department_seal_transparent.png');
+    sealTexture.encoding = THREE.sRGBEncoding;
+
+    const sealGroup = new THREE.Group();
+    // Positioned prominently on the rear wall to the right of the Level 5 door & keypad
+    sealGroup.position.set(2.8, 1.65, rearWallZ - 0.205);
+    sealGroup.rotation.y = Math.PI; // Face forward into starting room
+
+    // 3D Dark Bronze / Brass Backing Medallion Base
+    const plaqueGeo = new THREE.CylinderGeometry(1.02, 1.05, 0.04, 36);
+    plaqueGeo.rotateX(Math.PI / 2);
+    const plaqueMat = new THREE.MeshStandardMaterial({
+      color: 0x221a10,
+      metalness: 0.75,
+      roughness: 0.35
+    });
+    const plaqueMesh = new THREE.Mesh(plaqueGeo, plaqueMat);
+    plaqueMesh.position.z = -0.015;
+    sealGroup.add(plaqueMesh);
+
+    // High-Resolution Transparent Seal Decal / Medallion Face
+    const sealGeo = new THREE.PlaneGeometry(2.0, 2.0);
+    const sealMat = new THREE.MeshStandardMaterial({
+      map: sealTexture,
+      transparent: true,
+      alphaTest: 0.02,
+      roughness: 0.35,
+      metalness: 0.55
+    });
+    const sealMesh = new THREE.Mesh(sealGeo, sealMat);
+    sealMesh.position.z = 0.008;
+    sealGroup.add(sealMesh);
+
+    this.scene.add(sealGroup);
+    chunkData.meshes.push(sealGroup);
+
+    // Dedicated subtle accent spotlight illuminating the seal
+    const sealLight = new THREE.PointLight(0xfff0d0, 0.6, 6.0, 1.8);
+    sealLight.position.set(2.8, 2.3, rearWallZ - 0.85);
+    this.scene.add(sealLight);
+    chunkData.lights.push(sealLight);
+
+    const sealItem = {
+      mesh: sealMesh,
+      type: 'department_seal',
+      name: 'Department of Spatial Anomaly Seal ["OBSERVE • CONTAIN • UNDERSTAND"]',
+      action: 'examine_seal'
+    };
+    this.pushInteractive(sealItem);
+    chunkData.interactive.push(sealItem);
+
+    this.buildLevelFiveLaboratory(chunkData, rearWallZ, h);
 
     // Starting Room Lights (Balanced soft laboratory lighting)
     const l1 = this.lightManager.createFluorescentFixture(0, 3.0, 22, { color: 0xc8d4d8, intensity: 0.75, distance: 14.0 });
@@ -1619,7 +2631,6 @@ export class LevelBuilder {
 
     // Initial Tether Rope Model
     const ropeGeo = new THREE.CylinderGeometry(0.025, 0.025, 24, 8);
-    ropeGeo.rotateX(Math.PI / 2);
     const ropeMesh = new THREE.Mesh(ropeGeo, this.materials.rope);
     ropeMesh.position.set(0, 0.08, 12);
     this.scene.add(ropeMesh);
@@ -1631,7 +2642,267 @@ export class LevelBuilder {
     this.scene.add(solidWall);
     chunkData.meshes.push(solidWall);
 
-    this.shiftingSpace.registerEntrance(portalFrame, solidWall, ropeMesh);
+    const sealedEntranceCollider = new THREE.Box3().setFromObject(solidWall);
+    this.shiftingSpace.registerEntrance(portalFrame, solidWall, ropeMesh, () => {
+      this.registerCollider(sealedEntranceCollider);
+      chunkData.colliders.push(sealedEntranceCollider);
+    });
+  }
+
+  buildLevelFiveLaboratory(chunkData, frontZ, height) {
+    const width = 14;
+    const length = 16;
+    const centerZ = frontZ + length / 2;
+    const rearZ = frontZ + length;
+
+    const floorGeo = new THREE.PlaneGeometry(width, length);
+    floorGeo.rotateX(-Math.PI / 2);
+    const floor = new THREE.Mesh(floorGeo, this.materials.labFloor);
+    floor.position.set(0, 0, centerZ);
+    this.scene.add(floor);
+    chunkData.meshes.push(floor);
+
+    const ceilingGeo = new THREE.PlaneGeometry(width, length);
+    ceilingGeo.rotateX(Math.PI / 2);
+    const ceiling = new THREE.Mesh(ceilingGeo, this.materials.ceiling);
+    ceiling.position.set(0, height, centerZ);
+    this.scene.add(ceiling);
+    chunkData.meshes.push(ceiling);
+
+    this.addSolidWallToChunk(chunkData, -width / 2, height / 2, centerZ, 0.4, height, length, this.materials.labWall);
+    this.addSolidWallToChunk(chunkData, width / 2, height / 2, centerZ, 0.4, height, length, this.materials.labWall);
+    this.addSolidWallToChunk(chunkData, 0, height / 2, rearZ, width, height, 0.4, this.materials.labWall);
+    this.addSolidWallToChunk(chunkData, -6.5, height / 2, frontZ, 1.0, height, 0.4, this.materials.labWall);
+    this.addSolidWallToChunk(chunkData, 6.5, height / 2, frontZ, 1.0, height, 0.4, this.materials.labWall);
+
+    // Collision-safe work surfaces leave a clear central path from the airlock.
+    this.createTableToChunk(chunkData, -4.7, 0, frontZ + 7.0, 3.2, 1.2, 0.78);
+    this.createTableToChunk(chunkData, 4.7, 0, frontZ + 7.0, 3.2, 1.2, 0.78);
+    this.createTableToChunk(chunkData, 0, 0, frontZ + 12.0, 3.0, 1.25, 0.78);
+
+    // Supervisor Kenneth Vaughn Resignation Letter resting on top of the central desk
+    const letterGroup = new THREE.Group();
+    letterGroup.position.set(0.0, 0.835, frontZ + 12.0);
+    letterGroup.rotation.y = 0.08;
+
+    // Manila folder backing
+    const folderGeo = new THREE.BoxGeometry(0.46, 0.006, 0.60);
+    const folderMat = new THREE.MeshPhongMaterial({ color: 0xc9964e, roughness: 0.8 });
+    const folder = new THREE.Mesh(folderGeo, folderMat);
+    folder.position.y = 0.003;
+    letterGroup.add(folder);
+
+    // Letter stationary paper
+    const letterGeo = new THREE.BoxGeometry(0.40, 0.005, 0.52);
+    const letterMat = new THREE.MeshPhongMaterial({ color: 0xfffaeb, shininess: 8 });
+    const letterPaper = new THREE.Mesh(letterGeo, letterMat);
+    letterPaper.position.y = 0.008;
+    letterGroup.add(letterPaper);
+
+    // Red "CLASSIFIED" stamp header
+    const stampGeo = new THREE.PlaneGeometry(0.26, 0.045);
+    const stampMat = new THREE.MeshBasicMaterial({ color: 0xb52222, side: THREE.DoubleSide });
+    const stamp = new THREE.Mesh(stampGeo, stampMat);
+    stamp.rotation.x = -Math.PI / 2;
+    stamp.position.set(0, 0.012, -0.19);
+    letterGroup.add(stamp);
+
+    // Ink text lines simulating official typed resignation document
+    const inkMat = new THREE.MeshBasicMaterial({ color: 0x1a1a18, side: THREE.DoubleSide });
+    [-0.11, -0.05, 0.01, 0.07, 0.13, 0.19].forEach((zOffset) => {
+      const line = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.018), inkMat);
+      line.rotation.x = -Math.PI / 2;
+      line.position.set(0, 0.012, zOffset);
+      letterGroup.add(line);
+    });
+
+    this.scene.add(letterGroup);
+    chunkData.meshes.push(letterGroup);
+
+    // Dedicated subtle inspection light over the desk
+    const deskSpot = new THREE.PointLight(0xfff0d0, 1.2, 5.0);
+    deskSpot.position.set(0, 2.2, frontZ + 12.0);
+    this.scene.add(deskSpot);
+    chunkData.meshes.push(deskSpot);
+
+    // Interactive object proxy for reading the letter
+    const letterItem = {
+      mesh: letterPaper,
+      type: 'vaughn_resignation',
+      name: 'Document — Supervisor Kenneth Vaughn (Resignation Letter)',
+      action: 'read_resignation_letter'
+    };
+    this.pushInteractive(letterItem);
+    chunkData.interactive.push(letterItem);
+
+    // Rear containment tank provides a strong visual focal point from the doorway.
+    const tankGlassMat = new THREE.MeshPhongMaterial({
+      color: 0x87b8aa,
+      transparent: true,
+      opacity: 0.32,
+      shininess: 80,
+      specular: 0xaaffee,
+      side: THREE.DoubleSide
+    });
+    const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.72, 2.25, 20, 1, true), tankGlassMat);
+    tank.position.set(0, 1.2, rearZ - 1.35);
+    this.scene.add(tank);
+    chunkData.meshes.push(tank);
+
+    const tankBase = new THREE.Mesh(new THREE.CylinderGeometry(0.82, 0.82, 0.18, 20), this.materials.metal);
+    tankBase.position.set(0, 0.09, rearZ - 1.35);
+    const tankCap = tankBase.clone();
+    tankCap.position.y = 2.31;
+    this.scene.add(tankBase, tankCap);
+    chunkData.meshes.push(tankBase, tankCap);
+
+    const specimenMat = new THREE.MeshBasicMaterial({ color: 0x76ff9b, transparent: true, opacity: 0.65 });
+    const specimen = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 10), specimenMat);
+    specimen.scale.set(0.7, 1.8, 0.7);
+    specimen.position.set(0, 1.18, rearZ - 1.35);
+    this.scene.add(specimen);
+    chunkData.meshes.push(specimen);
+
+    // Handwritten research note taped to the front of the containment glass.
+    const noteGroup = new THREE.Group();
+    noteGroup.position.set(0.34, 1.48, rearZ - 2.075);
+    noteGroup.rotation.z = -0.07;
+
+    const notePaperMat = new THREE.MeshPhongMaterial({
+      color: 0xe9dfbd,
+      shininess: 2,
+      side: THREE.DoubleSide
+    });
+    const notePaper = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.44), notePaperMat);
+    noteGroup.add(notePaper);
+
+    const noteInkMat = new THREE.MeshBasicMaterial({ color: 0x35372f, side: THREE.DoubleSide });
+    [-0.08, -0.025, 0.03, 0.085].forEach((y, index) => {
+      const line = new THREE.Mesh(new THREE.PlaneGeometry(index === 0 ? 0.22 : 0.26, 0.012), noteInkMat);
+      line.position.set(index === 0 ? -0.025 : 0, y, -0.002);
+      noteGroup.add(line);
+    });
+
+    const tape = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.13, 0.055),
+      new THREE.MeshBasicMaterial({ color: 0xc7b786, transparent: true, opacity: 0.78, side: THREE.DoubleSide })
+    );
+    tape.position.set(0, 0.225, -0.003);
+    noteGroup.add(tape);
+
+    this.scene.add(noteGroup);
+    chunkData.meshes.push(noteGroup);
+
+    const containmentNoteItem = {
+      mesh: tank,
+      type: 'containment_note',
+      name: 'Containment Tube — Note Affixed to Glass',
+      action: 'read_lab_note'
+    };
+    this.pushInteractive(containmentNoteItem);
+    chunkData.interactive.push(containmentNoteItem);
+
+    const tankCollider = new THREE.Box3().setFromObject(tankBase).union(new THREE.Box3().setFromObject(tank));
+    this.registerCollider(tankCollider);
+    chunkData.colliders.push(tankCollider);
+
+    // Hardwired lab panels and storage remain visible even if the external model fails.
+    [-5.8, 5.8].forEach((x) => {
+      const cabinet = new THREE.Mesh(new THREE.BoxGeometry(1.45, 2.15, 0.65), this.materials.metal);
+      cabinet.position.set(x, 1.075, rearZ - 0.65);
+      this.scene.add(cabinet);
+      chunkData.meshes.push(cabinet);
+      const cabinetCollider = new THREE.Box3().setFromObject(cabinet);
+      this.registerCollider(cabinetCollider);
+      chunkData.colliders.push(cabinetCollider);
+    });
+
+    [frontZ + 3.0, frontZ + 8.0, frontZ + 13.0].forEach((z, index) => {
+      const fixture = this.lightManager.createFluorescentFixture(0, height - 0.15, z, {
+        color: 0xc9e8df,
+        intensity: index === 2 ? 1.15 : 0.9,
+        distance: 13.0,
+        isFailing: index === 1
+      });
+      if (index === 1) fixture.group.rotation.y = Math.PI / 2;
+      chunkData.lights.push(fixture);
+    });
+
+    this.loadSketchfabLaboratoryProps(chunkData, frontZ);
+  }
+
+  loadSketchfabLaboratoryProps(chunkData, frontZ) {
+    if (typeof THREE.GLTFLoader === 'undefined') {
+      console.warn('[Laboratory] GLTFLoader unavailable; using procedural lab props only.');
+      return;
+    }
+
+    const loader = new THREE.GLTFLoader();
+    loader.load('./assets/models/laboratory_extracted/scene.gltf', (gltf) => {
+      if (this.currentLevel !== 1 || this.activeChunks.get(chunkData.key) !== chunkData) return;
+
+      gltf.scene.updateMatrixWorld(true);
+      const props = [
+        { name: 'fridge', x: -5.7, y: 0, z: frontZ + 12.7, height: 2.05, rotationY: Math.PI / 2, collider: true },
+        { name: 'stool', x: 4.4, y: 0, z: frontZ + 8.4, height: 0.58, rotationY: -0.35, collider: true },
+        { name: 'chair', x: 5.3, y: 0, z: frontZ + 10.8, height: 0.95, rotationY: -Math.PI / 2, collider: true },
+        { name: 'round_bin', x: 5.9, y: 0, z: frontZ + 13.7, height: 0.52, rotationY: 0, collider: true },
+        { name: 'equipment', x: -4.7, y: 0.82, z: frontZ + 7.0, height: 0.42, rotationY: 0 },
+        { name: 'Beaker', x: -5.55, y: 0.82, z: frontZ + 6.8, height: 0.27, rotationY: 0.25 },
+        { name: 'smallBeaker', x: -3.95, y: 0.82, z: frontZ + 7.1, height: 0.18, rotationY: -0.2 },
+        { name: 'Monitor', x: 4.7, y: 0.82, z: frontZ + 7.25, height: 0.5, rotationY: Math.PI },
+        { name: 'keyboard', x: 4.7, y: 0.82, z: frontZ + 6.7, height: 0.07, rotationY: Math.PI },
+        { name: 'Mouse', x: 5.55, y: 0.82, z: frontZ + 6.7, height: 0.045, rotationY: Math.PI }
+      ];
+
+      props.forEach((prop) => this.placeSketchfabPropToChunk(chunkData, gltf.scene, prop));
+      console.log('[Laboratory] Sketchfab props loaded successfully.');
+    }, undefined, (err) => {
+      console.warn('[Laboratory] Failed to load Sketchfab laboratory assets:', err);
+    });
+  }
+
+  placeSketchfabPropToChunk(chunkData, sourceScene, prop) {
+    const source = sourceScene.getObjectByName(prop.name);
+    if (!source) return;
+
+    source.updateWorldMatrix(true, true);
+    const clone = source.clone(true);
+    source.matrixWorld.decompose(clone.position, clone.quaternion, clone.scale);
+    clone.updateMatrixWorld(true);
+
+    const initialBox = new THREE.Box3().setFromObject(clone);
+    const initialSize = initialBox.getSize(new THREE.Vector3());
+    if (!Number.isFinite(initialSize.y) || initialSize.y <= 0.0001) return;
+
+    clone.scale.multiplyScalar(prop.height / initialSize.y);
+    clone.updateMatrixWorld(true);
+    const scaledBox = new THREE.Box3().setFromObject(clone);
+    const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
+    clone.position.x -= scaledCenter.x;
+    clone.position.y -= scaledBox.min.y;
+    clone.position.z -= scaledCenter.z;
+
+    const wrapper = new THREE.Group();
+    wrapper.position.set(prop.x, prop.y, prop.z);
+    wrapper.rotation.y = prop.rotationY || 0;
+    wrapper.add(clone);
+    wrapper.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+
+    this.scene.add(wrapper);
+    chunkData.meshes.push(wrapper);
+
+    if (prop.collider) {
+      wrapper.updateMatrixWorld(true);
+      const collider = new THREE.Box3().setFromObject(wrapper);
+      this.registerCollider(collider);
+      chunkData.colliders.push(collider);
+    }
   }
 
   buildGatewayChunk(chunkData, cx, cz) {
@@ -1715,7 +2986,7 @@ export class LevelBuilder {
       name: 'Heavy Steel Maintenance Door',
       action: 'slam_and_escape'
     };
-    this.interactiveObjects.push(doorItem);
+    this.pushInteractive(doorItem);
     chunkData.interactive.push(doorItem);
 
     const l = this.lightManager.createFluorescentFixture(0, 2.9, -138, { color: 0xffe8a3, intensity: 1.6, isFailing: true });
@@ -1741,7 +3012,7 @@ export class LevelBuilder {
       name: 'Doorway ("LEVEL 2? / DON\'T GO BACK")',
       action: 'finish_level'
     };
-    this.interactiveObjects.push(exitItem);
+    this.pushInteractive(exitItem);
     chunkData.interactive.push(exitItem);
 
     const l = this.lightManager.createFluorescentFixture(0, 2.9, -168, { color: 0xffe8a3, intensity: 1.6 });
@@ -1782,6 +3053,17 @@ export class LevelBuilder {
   }
 
   // --- UNLOAD CHUNK & CLEANUP ---
+  // Order-independent swap-remove: none of these global lists are order-sensitive, so
+  // replacing the removed slot with the last element (O(1)) beats indexOf+splice (O(n))
+  // across thousands of colliders during multi-chunk unload bursts.
+  _swapRemove(arr, item) {
+    const idx = arr.indexOf(item);
+    if (idx !== -1) {
+      arr[idx] = arr[arr.length - 1];
+      arr.pop();
+    }
+  }
+
   removeChunk(key) {
     const chunk = this.activeChunks.get(key);
     if (!chunk) return;
@@ -1789,11 +3071,14 @@ export class LevelBuilder {
     chunk.meshes.forEach(m => {
       this.scene.remove(m);
       if (m.geometry) m.geometry.dispose();
+      if (m.material) {
+        if (Array.isArray(m.material)) m.material.forEach(mt => mt.dispose());
+        else m.material.dispose();
+      }
     });
 
     chunk.colliders.forEach(box => {
-      const idx = this.colliders.indexOf(box);
-      if (idx !== -1) this.colliders.splice(idx, 1);
+      this._swapRemove(this.colliders, box);
 
       const minCX = Math.floor(box.min.x / 4.0);
       const maxCX = Math.floor(box.max.x / 4.0);
@@ -1804,8 +3089,7 @@ export class LevelBuilder {
           const bKey = `${cx}_${cz}`;
           const list = this.spatialGrid.get(bKey);
           if (list) {
-            const bIdx = list.indexOf(box);
-            if (bIdx !== -1) list.splice(bIdx, 1);
+            this._swapRemove(list, box);
           }
         }
       }
@@ -1813,24 +3097,41 @@ export class LevelBuilder {
 
     chunk.lights.forEach(l => {
       this.scene.remove(l.group);
-      const lIdx = this.lightManager.lights.indexOf(l);
-      if (lIdx !== -1) this.lightManager.lights.splice(lIdx, 1);
+      // Dispose fixture casing/tube geometry + materials (unique per fixture) -- without
+      // this, long streaming sessions steadily leaked GPU memory.
+      l.group.traverse(child => {
+        if (child.isMesh) {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material && child.material.dispose) child.material.dispose();
+        }
+      });
+      this._swapRemove(this.lightManager.lights, l);
     });
 
     chunk.interactive.forEach(item => {
-      const itIdx = this.interactiveObjects.indexOf(item);
-      if (itIdx !== -1) this.interactiveObjects.splice(itIdx, 1);
+      this._swapRemove(this.interactiveObjects, item);
     });
+    this.interactiveVersion++;
 
     chunk.flooded.forEach(zone => {
-      const zIdx = this.floodedZones.indexOf(zone);
-      if (zIdx !== -1) this.floodedZones.splice(zIdx, 1);
+      this._swapRemove(this.floodedZones, zone);
     });
+
+    if (chunk.wallpaperWalls) {
+      chunk.wallpaperWalls.forEach(w => {
+        this._swapRemove(this.wallpaperWallMeshes, w);
+      });
+    }
 
     this.activeChunks.delete(key);
   }
 
   // --- COLLISION SPATIAL HASH & REGISTRATION ---
+  pushInteractive(item) {
+    this.interactiveObjects.push(item);
+    this.interactiveVersion++;
+  }
+
   registerCollider(box) {
     this.colliders.push(box);
     const minCX = Math.floor(box.min.x / 4.0);
@@ -1849,18 +3150,46 @@ export class LevelBuilder {
     }
   }
 
+  unregisterCollider(box) {
+    if (!box) return;
+
+    const index = this.colliders.indexOf(box);
+    if (index !== -1) this.colliders.splice(index, 1);
+
+    const minCX = Math.floor(box.min.x / 4.0);
+    const maxCX = Math.floor(box.max.x / 4.0);
+    const minCZ = Math.floor(box.min.z / 4.0);
+    const maxCZ = Math.floor(box.max.z / 4.0);
+    for (let cx = minCX; cx <= maxCX; cx++) {
+      for (let cz = minCZ; cz <= maxCZ; cz++) {
+        const key = `${cx}_${cz}`;
+        const list = this.spatialGrid.get(key);
+        if (!list) continue;
+        const gridIndex = list.indexOf(box);
+        if (gridIndex !== -1) list.splice(gridIndex, 1);
+      }
+    }
+  }
+
   getNearbyColliders(pos) {
     const cx = Math.floor(pos.x / 4.0);
     const cz = Math.floor(pos.z / 4.0);
-    const nearby = [];
+    // Reused result array + stamp-based dedup: boxes spanning multiple grid cells would
+    // otherwise be pushed (and intersection-tested by the player) several times per query,
+    // and allocating a fresh array per call fed the GC at 120 physics steps per second.
+    const nearby = this._nearbyCollidersScratch;
+    nearby.length = 0;
+    const stamp = ++this._queryStamp;
     for (let dx = -1; dx <= 1; dx++) {
       for (let dz = -1; dz <= 1; dz++) {
         const key = `${cx + dx}_${cz + dz}`;
         const list = this.spatialGrid.get(key);
-        if (list) {
-          for (let i = 0; i < list.length; i++) {
-            nearby.push(list[i]);
-          }
+        if (!list) continue;
+        for (let i = 0; i < list.length; i++) {
+          const box = list[i];
+          if (box._qs === stamp) continue;
+          box._qs = stamp;
+          nearby.push(box);
         }
       }
     }
@@ -1874,6 +3203,13 @@ export class LevelBuilder {
     wall.position.set(x, y, z);
     this.scene.add(wall);
     chunk.meshes.push(wall);
+
+    if (material === this.materials.wallpaper || material === this.materials.wallpaperLow) {
+      wall.isWallpaperWall = true;
+      this.wallpaperWallMeshes.push(wall);
+      if (!chunk.wallpaperWalls) chunk.wallpaperWalls = [];
+      chunk.wallpaperWalls.push(wall);
+    }
 
     const box = new THREE.Box3().setFromObject(wall);
     this.registerCollider(box);
@@ -1895,6 +3231,10 @@ export class LevelBuilder {
       lintel.position.set(x, height - lintelHeight / 2, z);
       this.scene.add(lintel);
       chunk.meshes.push(lintel);
+      lintel.isWallpaperWall = true;
+      this.wallpaperWallMeshes.push(lintel);
+      if (!chunk.wallpaperWalls) chunk.wallpaperWalls = [];
+      chunk.wallpaperWalls.push(lintel);
     } else {
       this.addSolidWallToChunk(chunk, x, y, z - length / 2 + postWidth / 2, thickness, height, postWidth, this.materials.wallpaper);
       this.addSolidWallToChunk(chunk, x, y, z + length / 2 - postWidth / 2, thickness, height, postWidth, this.materials.wallpaper);
@@ -1903,6 +3243,10 @@ export class LevelBuilder {
       lintel.position.set(x, height - lintelHeight / 2, z);
       this.scene.add(lintel);
       chunk.meshes.push(lintel);
+      lintel.isWallpaperWall = true;
+      this.wallpaperWallMeshes.push(lintel);
+      if (!chunk.wallpaperWalls) chunk.wallpaperWalls = [];
+      chunk.wallpaperWalls.push(lintel);
     }
   }
 
@@ -1936,6 +3280,10 @@ export class LevelBuilder {
     pillar.position.set(x, y, z);
     this.scene.add(pillar);
     chunk.meshes.push(pillar);
+    pillar.isWallpaperWall = true;
+    this.wallpaperWallMeshes.push(pillar);
+    if (!chunk.wallpaperWalls) chunk.wallpaperWalls = [];
+    chunk.wallpaperWalls.push(pillar);
 
     const box = new THREE.Box3().setFromObject(pillar);
     this.registerCollider(box);
@@ -1980,7 +3328,7 @@ export class LevelBuilder {
     const crate = new THREE.Mesh(geo, this.materials.table);
     crate.position.set(x, y + h / 2, z);
     this.scene.add(crate);
-    chunkData.meshes.push(crate);
+    chunk.meshes.push(crate);
 
     const box = new THREE.Box3().setFromObject(crate);
     this.registerCollider(box);
@@ -2031,6 +3379,54 @@ export class LevelBuilder {
       group.add(clearanceMark);
 
       group.rotation.y = -0.22;
+    } else if (type === 'convenience_store_key') {
+      const keyVisual = new THREE.Group();
+      if (this.convenienceStoreKeyModel) {
+        const keyClone = this.convenienceStoreKeyModel.clone(true);
+        keyClone.traverse((child) => {
+          if (child.isMesh) {
+            child.castShadow = false;
+            child.receiveShadow = true;
+          }
+        });
+        keyClone.updateMatrixWorld(true);
+        let keyBox = new THREE.Box3().setFromObject(keyClone);
+        const keySize = keyBox.getSize(new THREE.Vector3());
+        const largestDimension = Math.max(keySize.x, keySize.y, keySize.z);
+        if (largestDimension > 0.0001) keyClone.scale.multiplyScalar(0.24 / largestDimension);
+        keyClone.updateMatrixWorld(true);
+        keyBox = new THREE.Box3().setFromObject(keyClone);
+        const keyCenter = keyBox.getCenter(new THREE.Vector3());
+        keyClone.position.x -= keyCenter.x;
+        keyClone.position.y -= keyBox.min.y;
+        keyClone.position.z -= keyCenter.z;
+        keyVisual.add(keyClone);
+      } else {
+        const brass = new THREE.MeshPhongMaterial({ color: 0xa77a2a, shininess: 70, specular: 0xffd77a });
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.065, 0.015, 7, 16), brass);
+        ring.rotation.x = Math.PI / 2;
+        keyVisual.add(ring);
+        const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.025, 0.025), brass);
+        shaft.position.x = 0.13;
+        keyVisual.add(shaft);
+        const tooth = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.025, 0.06), brass);
+        tooth.position.set(0.2, 0, 0.02);
+        keyVisual.add(tooth);
+      }
+      keyVisual.rotation.y = 0.35;
+      keyVisual.position.y = 0.015;
+      group.add(keyVisual);
+
+      const keyHitbox = new THREE.Mesh(
+        new THREE.BoxGeometry(0.8, 0.8, 0.8),
+        new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+      );
+      keyHitbox.position.y = 0.15;
+      group.add(keyHitbox);
+
+      const keyGlow = new THREE.PointLight(0xffbd58, 1.2, 4.5, 1.4);
+      keyGlow.position.y = 0.25;
+      group.add(keyGlow);
     } else if (type === 'almond_water') {
       // Vintage Glass Bottle with Vintage Label & Metallic Cap
       const bottleGeo = new THREE.CylinderGeometry(0.045, 0.05, 0.18, 12);
@@ -2147,7 +3543,10 @@ export class LevelBuilder {
     } else if (type.includes('tape') || type.includes('mercer') || type.includes('cole')) {
       // 1980s Microcassette Body (Black plastic shell with cream/white label & spool holes)
       const tapeGeo = new THREE.BoxGeometry(0.26, 0.05, 0.17);
-      const tapeMesh = new THREE.Mesh(tapeGeo, this.materials.tape);
+      const tapeMaterial = type === 'highway_reed_store_tape'
+        ? new THREE.MeshPhongMaterial({ color: 0x2f2925, emissive: 0x100704, shininess: 18 })
+        : this.materials.tape;
+      const tapeMesh = new THREE.Mesh(tapeGeo, tapeMaterial);
       tapeMesh.position.y = 0.025;
       group.add(tapeMesh);
 
@@ -2166,6 +3565,17 @@ export class LevelBuilder {
       const line = new THREE.Mesh(lineGeo, lineMat);
       line.position.set(0, 0.053, -0.03);
       group.add(line);
+
+      if (type === 'highway_reed_store_tape') {
+        const marker = new THREE.Mesh(
+          new THREE.RingGeometry(0.18, 0.25, 24),
+          new THREE.MeshBasicMaterial({ color: 0xff9b42, transparent: true, opacity: 0.72, side: THREE.DoubleSide })
+        );
+        marker.rotation.x = -Math.PI / 2;
+        marker.position.y = 0.004;
+        group.add(marker);
+        group.scale.setScalar(1.45);
+      }
     } else {
       const paperGeo = new THREE.PlaneGeometry(0.3, 0.35);
       paperGeo.rotateX(-Math.PI / 2);
@@ -2183,8 +3593,54 @@ export class LevelBuilder {
       name,
       worldPos: new THREE.Vector3(x, y, z)
     };
-    this.interactiveObjects.push(itemObj);
+    this.pushInteractive(itemObj);
     chunk.interactive.push(itemObj);
     return group;
+  }
+
+  // --- DYNAMIC WALLPAPER VIEW-DEPENDENT LOD MANAGER ---
+  updateWallpaperLOD(camera) {
+    if (this.currentLevel !== 1 || !camera || this.wallpaperWallMeshes.length === 0) return;
+
+    this.lodFrameCounter = (this.lodFrameCounter + 1) % 3;
+    if (this.lodFrameCounter !== 0) return;
+
+    const camPos = camera.position;
+    const camDir = this._lodCamDir;
+    camera.getWorldDirection(camDir);
+
+    const highResDistSq = 16.0 * 16.0; // 16 meters for crisp high-resolution wallpaper in view
+    const fovCosThreshold = 0.20; // In-view forward cone (~78 degrees)
+
+    for (let i = 0; i < this.wallpaperWallMeshes.length; i++) {
+      const wall = this.wallpaperWallMeshes[i];
+      if (!wall || !wall.parent) continue;
+
+      const dx = wall.position.x - camPos.x;
+      const dz = wall.position.z - camPos.z;
+      const distSq = dx * dx + dz * dz;
+
+      let isDirectlyInView = false;
+      if (distSq < highResDistSq) {
+        if (distSq < 3.8 * 3.8) {
+          // Immediately adjacent walls (player touching or next to wall)
+          isDirectlyInView = true;
+        } else {
+          // Check if wall is within the camera's forward viewing cone
+          const invDist = 1.0 / Math.sqrt(distSq);
+          const dirX = dx * invDist;
+          const dirZ = dz * invDist;
+          const dot = dirX * camDir.x + dirZ * camDir.z;
+          if (dot > fovCosThreshold) {
+            isDirectlyInView = true;
+          }
+        }
+      }
+
+      const targetMat = isDirectlyInView ? this.materials.wallpaper : this.materials.wallpaperLow;
+      if (wall.material !== targetMat) {
+        wall.material = targetMat;
+      }
+    }
   }
 }
