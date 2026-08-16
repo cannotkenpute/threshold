@@ -1,0 +1,11 @@
+Model Information:
+* title:	Horror Humanoid Creature
+* source:	https://sketchfab.com/3d-models/horror-humanoid-creature-b5874b20f8c34b919a52eb3cb7dad94c
+* author:	PurplePoint (https://sketchfab.com/Purple_Point)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Horror Humanoid Creature" (https://sketchfab.com/3d-models/horror-humanoid-creature-b5874b20f8c34b919a52eb3cb7dad94c) by PurplePoint (https://sketchfab.com/Purple_Point) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

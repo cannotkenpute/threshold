@@ -1,0 +1,16 @@
+{
+  "name": "threshold",
+  "version": "0.1.0",
+  "private": true,
+  "description": "THRESHOLD — vanilla JS ES-module Three.js horror game (no framework, no build step)",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "lint": "node scripts/lint/check-syntax.mjs",
+    "lint:manifests": "node scripts/lint/validate-manifests.mjs",
+    "test:logic": "node scripts/test/multiplayer-logic.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

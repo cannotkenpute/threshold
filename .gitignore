@@ -1,4 +1,12 @@
+# Dependencies
 node_modules/
+
+# Local secrets / environment (NEVER commit)
+.env
+.env.*
+!.env.example
+
+# OS / build cruft
 .DS_Store
 Thumbs.db
 *.dmg

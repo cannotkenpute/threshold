@@ -1,7 +1,15 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "buildCommand": "",
-  "outputDirectory": ".",
   "installCommand": "",
-  "cleanUrls": false
+  "outputDirectory": ".",
+  "routes": [
+    { "src": "/\\.env.*", "status": 404 },
+    { "src": "/\\.git.*", "status": 404 },
+    { "src": "/graphify-out/.*", "status": 404 },
+    { "src": "/\\.commandcode/.*", "status": 404 },
+    { "src": "/\\.deepcode/.*", "status": 404 },
+    { "handle": "filesystem" }
+  ]
 }

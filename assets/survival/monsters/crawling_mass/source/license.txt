@@ -1,0 +1,11 @@
+Model Information:
+* title:	The Flesh
+* source:	https://sketchfab.com/3d-models/the-flesh-47fb5fb4ea0640819e5a2b1a5696a120
+* author:	CameronProteau (https://sketchfab.com/CameronProteau)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "The Flesh" (https://sketchfab.com/3d-models/the-flesh-47fb5fb4ea0640819e5a2b1a5696a120) by CameronProteau (https://sketchfab.com/CameronProteau) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

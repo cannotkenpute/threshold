@@ -1,6 +1,13 @@
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { loadEnv, getPublicSupabaseConfig } from './server/loadEnv.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Load .env.local / .env into process.env (no external dependency)
+loadEnv();
 
 const PORT = process.env.PORT || 8080;
 const ROOT = path.resolve(__dirname);
@@ -66,23 +73,46 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 2. Public runtime config for the browser (browser-safe values ONLY).
+  //    The multiplayer client fetches this instead of relying on a bundler to inject NEXT_PUBLIC_ vars.
+  if (req.url.split('?')[0] === '/api/public-config') {
+    const body = JSON.stringify(getPublicSupabaseConfig());
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(body);
+    return;
+  }
+
   // Parse requested URL
   let parsedUrl = req.url.split('?')[0];
   if (parsedUrl === '/') parsedUrl = '/index.html';
-  
+
   // Safe path resolution
   const decodedPath = decodeURIComponent(parsedUrl);
+
+  // SECURITY: never serve secrets or hidden files (.env*, dotfiles, git metadata).
+  const blockedSegment = decodedPath.split('/').some((seg) => {
+    if (!seg) return false;
+    if (seg === '.env' || seg.startsWith('.env')) return true;
+    if (seg === '.git' || seg === '.commandcode' || seg === '.deepcode') return true;
+    return false;
+  });
+  if (blockedSegment) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    res.end('403 Forbidden');
+    return;
+  }
+
   let filePath = path.join(ROOT, decodedPath);
 
-  // Case-insensitive fallback for Assets vs assets on macOS
-  if (!fs.existsSync(filePath)) {
-    if (decodedPath.startsWith('/assets/')) {
-      const altPath = path.join(ROOT, decodedPath.replace('/assets/', '/Assets/'));
-      if (fs.existsSync(altPath)) filePath = altPath;
-    } else if (decodedPath.startsWith('/Assets/')) {
-      const altPath = path.join(ROOT, decodedPath.replace('/Assets/', '/assets/'));
-      if (fs.existsSync(altPath)) filePath = altPath;
-    }
+  // SECURITY: prevent path traversal outside the project root.
+  if (!filePath.startsWith(ROOT + path.sep) && filePath !== ROOT) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    res.end('403 Forbidden');
+    return;
   }
 
   fs.stat(filePath, (err, stats) => {

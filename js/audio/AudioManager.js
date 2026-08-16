@@ -504,4 +504,9 @@ export class AudioManager {
       this.titleMusicEl.currentTime = 0;
     } catch (e) {}
   }
+
+  // Whether the title music is currently playing (used by the soundtrack UI).
+  isTitleMusicPlaying() {
+    return !!(this.titleMusicEl && !this.titleMusicEl.paused && !this.titleMusicEl.ended);
+  }
 }

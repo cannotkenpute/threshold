@@ -764,6 +764,14 @@ canvas {
   z-index: 150;
 }
 
+/* The soundtrack and options modals are also opened over the still-visible title
+   screen (#title-screen is z-index 100, above .modal-overlay's 50), so they need the
+   same elevated stacking context as the changelog or the title buttons overlap them. */
+#soundtrack-modal,
+#options-modal {
+  z-index: 150;
+}
+
 /* Changelog modal: only the entry list scrolls -- the dismiss button stays pinned and visible
    instead of the whole paper (header + body + button) scrolling together, which could push the
    only way to close the modal below the fold. */

@@ -1,0 +1,11 @@
+Model Information:
+* title:	The Fifth Knight - Gas Mask Character
+* source:	https://sketchfab.com/3d-models/the-fifth-knight-gas-mask-character-b3011820639340c5812cdae329bc7a8f
+* author:	leunamanuelgc (https://sketchfab.com/leunamanuelgc)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "The Fifth Knight - Gas Mask Character" (https://sketchfab.com/3d-models/the-fifth-knight-gas-mask-character-b3011820639340c5812cdae329bc7a8f) by leunamanuelgc (https://sketchfab.com/leunamanuelgc) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

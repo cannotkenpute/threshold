@@ -161,8 +161,10 @@ class GameEngine {
     this.showChangelog();
 
     // Unlock the AudioContext and start looping title music on the first user
-    // gesture (browsers block autoplay until an interaction). Entering story or
-    // survival mode stops it via stopTitleMusic() in those entry points.
+    // gesture (browsers block autoplay until an interaction). The music is
+    // auto-started exactly once; after that the SOUNDTRACK menu owns it, so
+    // clicking around the title won't silently restart a track the player stopped.
+    let titleMusicAutoStarted = false;
     const unlockTitleAudio = () => {
       if (this.state.mode !== GAME_MODES.TITLE) return;
       try {
@@ -171,7 +173,10 @@ class GameEngine {
           this.audio.resume();
         }
       } catch (e) {}
-      this.audio.startTitleMusic();
+      if (!titleMusicAutoStarted) {
+        titleMusicAutoStarted = true;
+        this.audio.startTitleMusic();
+      }
     };
     // Registered in the CAPTURE phase (the `true` third argument) so this always fires first,
     // before any element's own bubble-phase handler -- e.g. btn-start-game's pointerdown
@@ -187,8 +192,48 @@ class GameEngine {
         e.stopPropagation();
         this.audio.init();
         this.audio.resume();
-        this.audio.startTitleMusic();
         this.optionsUI.openTitle();
+      });
+    }
+
+    // Title screen "SOUNDTRACK" button opens the soundtrack browser
+    const soundtrackBtn = document.getElementById('btn-title-soundtrack');
+    const soundtrackModal = document.getElementById('soundtrack-modal');
+    const soundtrackCloseBtn = document.getElementById('btn-soundtrack-close');
+    const trackTitleScreenBtn = document.getElementById('btn-track-title-screen');
+
+    const updateTrackButton = () => {
+      if (trackTitleScreenBtn) {
+        trackTitleScreenBtn.textContent = this.audio.isTitleMusicPlaying() ? '⏹' : '▶';
+      }
+    };
+
+    if (soundtrackBtn && soundtrackModal) {
+      soundtrackBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.audio.init();
+        this.audio.resume();
+        updateTrackButton();
+        soundtrackModal.classList.add('active');
+      });
+    }
+
+    if (soundtrackCloseBtn && soundtrackModal) {
+      soundtrackCloseBtn.addEventListener('click', () => {
+        soundtrackModal.classList.remove('active');
+      });
+    }
+
+    if (trackTitleScreenBtn) {
+      trackTitleScreenBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (this.audio.isTitleMusicPlaying()) {
+          this.audio.stopTitleMusic();
+          trackTitleScreenBtn.textContent = '▶';
+        } else {
+          this.audio.startTitleMusic();
+          trackTitleScreenBtn.textContent = '⏹';
+        }
       });
     }
 
@@ -396,6 +441,11 @@ class GameEngine {
   setupModalDismiss() {
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Escape' || e.key === 'Escape') {
+        const soundtrackModal = document.getElementById('soundtrack-modal');
+        if (soundtrackModal && soundtrackModal.classList.contains('active')) {
+          soundtrackModal.classList.remove('active');
+          return;
+        }
         if (this.archiveUI && this.archiveUI.isOpen) {
           this.archiveUI.close();
           return;
