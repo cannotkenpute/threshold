@@ -30,6 +30,7 @@ export default async function handler(req, res) {
       p_game_version: GAME_VERSION,
       p_protocol_version: PROTOCOL_VERSION,
       p_max_players: body.maxPlayers,
+      p_game_mode: body.gameMode,
     };
   } catch (err) {
     if (err instanceof ValidationError) {

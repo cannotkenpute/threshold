@@ -22,9 +22,10 @@ import { CassetteUI } from './ui/CassetteUI.js';
 import { DialogueUI } from './ui/DialogueUI.js';
 import { OptionsUI } from './ui/OptionsUI.js';
 import { ArchiveUI } from './ui/ArchiveUI.js';
-import { MultiplayerUI } from './ui/MultiplayerUI.js';
+import { MultiplayerUI, getStoredPlayerName } from './ui/MultiplayerUI.js';
 import { MultiplayerManager } from './multiplayer/MultiplayerManager.js';
 import { MatchAuthorityController } from './multiplayer/MatchAuthorityController.js';
+import { MultiplayerPlayerSync } from './multiplayer/MultiplayerPlayerSync.js';
 import { EscapeCutscene } from './cinematics/EscapeCutscene.js';
 import { OpeningSequence } from './cinematics/OpeningSequence.js';
 
@@ -81,6 +82,7 @@ class GameEngine {
       this.shiftingSpace
     );
     this.survivalMonsterDirector = null;
+    this.multiplayerPlayerSync = null;
 
     // Input & Options (with dev teleport capabilities)
     this.input = new InputManager(document.body, (action) => this.handleAction(action));
@@ -89,12 +91,21 @@ class GameEngine {
     this.multiplayerManager = new MultiplayerManager();
     this.multiplayerUI = new MultiplayerUI(this.multiplayerManager);
 
-    // Phase 8: when the match loading barrier completes, enter Survival and hand the
-    // host its authority config (clients get a renderer + non-authoritative sync).
-    this.multiplayerManager.onMatchReady = ({ selfId, isAuthority, transport }) => {
+    // Phase 8: when the match loading barrier completes, enter the lobby's chosen game
+    // mode and hand the host its authority config (clients get a renderer + non-authoritative
+    // sync). game_mode was picked at CREATE LOBBY time (see MultiplayerUI.js) and travels on
+    // the lobby row itself, so it's already sitting on lobbyManager.lobby by the time the
+    // match starts -- no need to thread it through matchInfo separately.
+    this.multiplayerManager.onMatchReady = ({ selfId, isAuthority, transport, seed, spawns }) => {
       this.multiplayerAuthority = { transport, selfId, isAuthority };
       this.multiplayerUI.close();
-      this.launchSurvivalMode();
+      const mySpawn = spawns && selfId !== null && selfId !== undefined ? spawns[selfId] : null;
+      const gameMode = this.multiplayerManager.lobby ? this.multiplayerManager.lobby.game_mode : 'SURVIVAL';
+      if (gameMode === 'STORY') {
+        this.launchGameplay(seed, mySpawn);
+      } else {
+        this.launchSurvivalMode(seed, mySpawn);
+      }
       // Loading barrier: report this client as PLAYING once the scene is up.
       this.multiplayerManager.markSceneLoaded();
     };
@@ -133,7 +144,10 @@ class GameEngine {
     this.openingSequence.start();
   }
 
-  launchGameplay() {
+  // `matchSeed`/`spawn` (multiplayer Story co-op only) -- same purpose as in
+  // launchSurvivalMode(): shared maze layout + the 4-corner spawn cluster instead of every
+  // member landing on the same tile. Null/omitted for solo play (unseeded, default spawn).
+  launchGameplay(matchSeed = null, spawn = null) {
     if (this.state.mode === GAME_MODES.GAMEPLAY) return;
 
     try {
@@ -156,20 +170,33 @@ class GameEngine {
     }
 
     // Load Level 1 Yellow Sector and reset player spawn position
-    this.levelBuilder.buildFullLevel();
-    this.player.position.set(0, 1.65, 20);
-    this.player.camera.position.set(0, 1.65, 20);
+    this.levelBuilder.buildFullLevel(matchSeed);
+    const spawnX = spawn ? spawn.x : 0;
+    const spawnZ = spawn ? spawn.z : 20;
+    this.player.position.set(spawnX, 1.65, spawnZ);
+    this.player.camera.position.set(spawnX, 1.65, spawnZ);
     this.player.velocity.set(0, 0, 0);
+    if (spawn && Number.isFinite(spawn.yaw)) {
+      this.player.rotation.set(0, spawn.yaw, 0, 'YXZ');
+      this.player.camera.rotation.copy(this.player.rotation);
+    }
 
     this.state.setMode(GAME_MODES.GAMEPLAY);
     this.input.requestLock();
     this.isRunning = true;
 
-    // Show opening supervisor dialogue and play distorted radio voiceover
-    setTimeout(() => {
-      this.dialogue.showSubtitle("SUPERVISOR: Vaughn here. Tether is secured to the gateway frame. Enter DTE-04, locate Mercer's team, and return.", "supervisor", 7000);
-      this.audio.playRadioVoiceAudio('./assets/audio/dialogue%231.mp3');
-    }, 1000);
+    // Multiplayer Story co-op: avatars/nameplates/ping/roster only -- no Survival-specific
+    // vitals/monster/fear authority (see _setupMultiplayerRuntime()'s doc comment).
+    if (this.multiplayerAuthority) this._setupMultiplayerRuntime();
+
+    // Show opening supervisor dialogue and play distorted radio voiceover (solo intro beat;
+    // multiplayer co-op skips straight into gameplay, same as Survival's match start).
+    if (!this.multiplayerAuthority) {
+      setTimeout(() => {
+        this.dialogue.showSubtitle("SUPERVISOR: Vaughn here. Tether is secured to the gateway frame. Enter DTE-04, locate Mercer's team, and return.", "supervisor", 7000);
+        this.audio.playRadioVoiceAudio('./assets/audio/dialogue%231.mp3');
+      }, 1000);
+    }
   }
 
   initTitleScreen() {
@@ -366,7 +393,13 @@ class GameEngine {
   // Level 1 geometry as the survival space (per the design review's "bounded, reused map"
   // call), and layers Hunger/Thirst/Fear-Factor sustainment systems on top of the shared
   // core gameplay loop. Permadeath applies -- see Player.handleDeath().
-  launchSurvivalMode() {
+  // `matchSeed` (multiplayer only) is the host-issued seed shared by every member of the
+  // match -- forwarded into LevelBuilder.buildFullLevel() so all clients generate the same
+  // maze layout instead of each independently rolling their own via Math.random(). `spawn`
+  // (multiplayer only) is this player's { x, z, yaw } from computeSpawnAssignment's 4-corner
+  // cluster -- without it every match member lands on the exact same tile, stacked on top of
+  // each other.
+  launchSurvivalMode(matchSeed = null, spawn = null) {
     if (this.state.mode === GAME_MODES.SURVIVAL) return;
 
     try {
@@ -391,10 +424,16 @@ class GameEngine {
     // lock the starting area to the story item pool.
     this.levelBuilder.survivalMode = true;
     this.levelBuilder.survivalScarcityMultiplier = 1.0;
-    this.levelBuilder.buildFullLevel();
-    this.player.position.set(0, 1.65, 20);
-    this.player.camera.position.set(0, 1.65, 20);
+    this.levelBuilder.buildFullLevel(matchSeed);
+    const spawnX = spawn ? spawn.x : 0;
+    const spawnZ = spawn ? spawn.z : 20;
+    this.player.position.set(spawnX, 1.65, spawnZ);
+    this.player.camera.position.set(spawnX, 1.65, spawnZ);
     this.player.velocity.set(0, 0, 0);
+    if (spawn && Number.isFinite(spawn.yaw)) {
+      this.player.rotation.set(0, spawn.yaw, 0, 'YXZ');
+      this.player.camera.rotation.copy(this.player.rotation);
+    }
 
     // Establish Survival sustainment systems & permadeath
     this.player.survivalState = new SurvivalState(this.player, this.lightManager);
@@ -478,14 +517,81 @@ class GameEngine {
     }
   }
 
-  // Phase 8: bind the host-authoritative Survival authority to a match transport.
-  // `this.multiplayerAuthority` = { transport, selfId, isAuthority }, supplied by the
-  // match flow. Unset in solo Survival, so this is a no-op there.
+  // Top-right HUD: server ping + connected player roster. Throttled alongside the rest of
+  // the HUD (see the isSurvivalMode block in update()); only called while in a match.
+  _updateMultiplayerHud() {
+    const pingEl = document.getElementById('mp-ping-value');
+    if (pingEl) {
+      const ping = this.multiplayerManager.pingMs;
+      pingEl.textContent = ping === null || ping === undefined ? '--' : String(ping);
+    }
+
+    const rosterEl = document.getElementById('mp-player-roster');
+    if (!rosterEl) return;
+    const cfg = this.multiplayerAuthority;
+    const hostId = this.multiplayerManager.lobby ? this.multiplayerManager.lobby.host_player_id : null;
+    const entries = [{
+      id: cfg.selfId,
+      name: getStoredPlayerName(),
+      isSelf: true,
+      isHost: cfg.selfId === hostId,
+      connected: true,
+    }];
+    if (this.multiplayerPlayerSync) {
+      for (const r of this.multiplayerPlayerSync.getRemotePlayers()) {
+        entries.push({ id: r.id, name: r.name, isSelf: false, isHost: r.id === hostId, connected: r.connected });
+      }
+    }
+
+    rosterEl.innerHTML = entries.map((e) => `
+      <div class="mp-player-roster-entry${e.isSelf ? ' self' : ''}${e.connected ? '' : ' disconnected'}">
+        <span class="mp-roster-name">${escapeHtmlForHud(e.name)}</span>
+        ${e.isHost ? '<span class="mp-roster-host">HOST</span>' : ''}
+      </div>
+    `).join('');
+  }
+
+  // Shared by both multiplayer game modes: remote player avatars/nameplates, server ping,
+  // and the top-right roster HUD. `this.multiplayerAuthority` = { transport, selfId,
+  // isAuthority }, supplied by the match flow. Unset in solo play, so this is a no-op there.
+  // Survival additionally layers _setupSurvivalAuthority() (vitals/monster/fear sync) on top;
+  // Story co-op ("shared exploration" -- see js/multiplayer/MultiplayerPlayerSync.js) uses
+  // only this, since it has no Survival-specific state to replicate.
+  _setupMultiplayerRuntime() {
+    if (this.multiplayerPlayerSync) {
+      this.multiplayerPlayerSync.dispose();
+      this.multiplayerPlayerSync = null;
+    }
+    this.multiplayerManager.stopPingMonitor();
+    const mpHud = document.getElementById('mp-status-hud');
+    if (mpHud) mpHud.style.display = 'none';
+
+    const cfg = this.multiplayerAuthority;
+    if (!cfg || !cfg.transport) return;
+
+    // Remote player avatars + floating callsigns (every member renders every other
+    // member -- there is no separate "authority" role for this, unlike monsters/fear).
+    this.multiplayerPlayerSync = new MultiplayerPlayerSync({
+      scene: this.renderer.scene,
+      transport: cfg.transport,
+      selfId: cfg.selfId,
+      localName: getStoredPlayerName(),
+    }).setLocalPlayer(this.player).startSending();
+
+    this.multiplayerManager.startPingMonitor();
+    if (mpHud) mpHud.style.display = '';
+  }
+
+  // Phase 8: bind the host-authoritative Survival authority (vitals/monster/fear sync) to a
+  // match transport. Survival-only -- Story co-op has no equivalent yet (see
+  // _setupMultiplayerRuntime() above for what both modes share). No-op in solo Survival.
   _setupSurvivalAuthority() {
     if (this.survivalAuthority) {
       this.survivalAuthority.dispose();
       this.survivalAuthority = null;
     }
+    this._setupMultiplayerRuntime();
+
     const cfg = this.multiplayerAuthority;
     if (!cfg || !cfg.transport) return;
 
@@ -511,6 +617,13 @@ class GameEngine {
     this.input.exitLock();
     if (this.survivalMonsterDirector) this.survivalMonsterDirector.dispose();
     if (this.optionsUI) this.optionsUI.setMonsterDirector(null);
+    if (this.multiplayerPlayerSync) {
+      this.multiplayerPlayerSync.dispose();
+      this.multiplayerPlayerSync = null;
+    }
+    this.multiplayerManager.stopPingMonitor();
+    const mpHudEl = document.getElementById('mp-status-hud');
+    if (mpHudEl) mpHudEl.style.display = 'none';
     if (this.survivalAuthority) this.survivalAuthority.dispose();
 
     // A safe non-gameplay state: nothing in update() handles PAUSED, so the per-frame
@@ -572,6 +685,7 @@ class GameEngine {
       this.optionsUI.toggle();
     } else if (action === 'flashlight') {
       this.player.toggleFlashlight();
+      if (this.multiplayerPlayerSync) this.multiplayerPlayerSync.broadcastFlashlight(this.player.isFlashlightOn);
     } else if (action === 'interact') {
       this.handlePlayerInteract();
     } else if (action === 'use_item') {
@@ -933,12 +1047,15 @@ class GameEngine {
         this.hud.updateVitals(this.player.batteryLevel, this.player.stamina, this.player.sanity, this.player.health);
         this.hud.updatePowerGrid(this.lightManager.getCycleInfo());
         this.hud.updateInteractivePrompt(this.player.focusedInteractive);
+        if (this.multiplayerAuthority) this._updateMultiplayerHud();
       }
       this.hud.updateCompass(this.player.rotation.y, this.player.position);
 
       if (isSurvivalMode) {
         // 6. Survival Mode: Hunger/Thirst/Fear Factor ticking, cycle-driven scarcity, death check
         this.updateSurvivalMode(delta);
+        // 7. Multiplayer: apply interpolated remote player avatars/nameplates (no-op solo).
+        if (this.multiplayerPlayerSync) this.multiplayerPlayerSync.update(delta);
       }
     } else if (this.state.mode === GAME_MODES.CUTSCENE) {
       // 10-Hour Escape Driving Cutscene & Night Highway Progression
@@ -977,6 +1094,12 @@ class GameEngine {
     // Render Scene through 1980s Retro Shaders
     this.renderer.render(elapsedTime);
   }
+}
+
+function escapeHtmlForHud(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
 }
 
 // Bootstrap once DOM is loaded or immediately if already ready

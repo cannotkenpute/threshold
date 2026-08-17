@@ -402,9 +402,76 @@ canvas {
   top: 24px;
   right: 28px;
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.top-right-hud-row {
+  display: flex;
   align-items: center;
   gap: 14px;
-  pointer-events: none;
+}
+
+.mp-status-hud {
+  background: rgba(12, 16, 10, 0.88);
+  border: 1px solid #33442a;
+  border-radius: 3px;
+  padding: 8px 10px;
+  font-family: var(--ui-font-mono);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.85), inset 0 0 6px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+  min-width: 150px;
+}
+
+.mp-ping-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.mp-player-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-top: 1px solid #2d3c26;
+  padding-top: 6px;
+}
+
+.mp-player-roster-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.78rem;
+  letter-spacing: 0.5px;
+  color: #aacc99;
+}
+
+.mp-player-roster-entry .mp-roster-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mp-player-roster-entry.self .mp-roster-name {
+  color: #ffb000;
+}
+
+.mp-player-roster-entry .mp-roster-host {
+  font-size: 0.65rem;
+  color: #ffb000;
+  border: 1px solid #6b5329;
+  border-radius: 2px;
+  padding: 0 4px;
+  letter-spacing: 1px;
+}
+
+.mp-player-roster-entry.disconnected .mp-roster-name {
+  color: #665f55;
+  text-decoration: line-through;
 }
 
 .fps-counter-widget {
@@ -2423,6 +2490,23 @@ canvas {
   letter-spacing: 0.5px;
 }
 
+.mp-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.mp-name-row .option-label {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.mp-name-row input {
+  flex: 1;
+  text-transform: uppercase;
+}
+
 .mp-view {
   display: none;
   flex-direction: column;
@@ -2527,6 +2611,22 @@ canvas {
   color: var(--crt-amber);
   letter-spacing: 6px;
   text-shadow: 0 0 10px rgba(255, 176, 0, 0.6);
+}
+
+.mp-lobby-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.85rem;
+  color: #aacc99;
+  letter-spacing: 2px;
+}
+
+.mp-lobby-mode {
+  font-family: var(--ui-font-mono);
+  font-size: 0.95rem;
+  color: var(--crt-green);
+  letter-spacing: 2px;
 }
 
 .mp-slots {

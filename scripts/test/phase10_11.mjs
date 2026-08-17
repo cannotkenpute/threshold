@@ -204,7 +204,7 @@ await t('join code + region + create-lobby body + page limit', () => {
   assert.equal(v.isUuid('9be47c60-f621-4abb-a682-34d8d8b3c51a'), true);
   assert.throws(() => v.validateJoinCode('bad'), v.ValidationError);
   assert.throws(() => v.validateCreateLobbyBody({ maxPlayers: 9 }), v.ValidationError);
-  assert.deepEqual(v.validateCreateLobbyBody({}), { visibility: 'PUBLIC', region: 'AUTO', difficulty: null, maxPlayers: 4 });
+  assert.deepEqual(v.validateCreateLobbyBody({}), { visibility: 'PUBLIC', region: 'AUTO', difficulty: null, maxPlayers: 4, gameMode: 'SURVIVAL' });
   assert.throws(() => v.validatePageLimit('999'), v.ValidationError);
   assert.equal(v.validatePageLimit(undefined), 25);
 });

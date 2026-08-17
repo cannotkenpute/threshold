@@ -76,7 +76,7 @@ test('validatePageLimit enforces 1-50, defaults to 25', () => {
 
 test('validateCreateLobbyBody composes all field validators', () => {
   const body = V.validateCreateLobbyBody({ visibility: 'PRIVATE', region: 'EUROPE', maxPlayers: 2 });
-  assert.deepEqual(body, { visibility: 'PRIVATE', region: 'EUROPE', difficulty: null, maxPlayers: 2 });
+  assert.deepEqual(body, { visibility: 'PRIVATE', region: 'EUROPE', difficulty: null, maxPlayers: 2, gameMode: 'SURVIVAL' });
 });
 
 // --- response.js ---------------------------------------------------------

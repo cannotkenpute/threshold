@@ -7,6 +7,18 @@
  * (architecture doc §17, §49-51): menu, browser, create, code, lobby.
  */
 
+const PLAYER_NAME_STORAGE_KEY = 'threshold_mp_player_name';
+
+/** Chosen callsign persisted across sessions; falls back to 'PLAYER' if never set. */
+export function getStoredPlayerName() {
+  try {
+    const raw = localStorage.getItem(PLAYER_NAME_STORAGE_KEY);
+    return raw && raw.trim() ? raw.trim().slice(0, 24) : 'PLAYER';
+  } catch (err) {
+    return 'PLAYER';
+  }
+}
+
 const ERROR_MESSAGES = {
   LOBBY_NOT_FOUND: 'That lobby no longer exists.',
   LOBBY_FULL: 'That lobby is full.',
@@ -41,6 +53,7 @@ export class MultiplayerUI {
     this.backBtn = document.getElementById('mp-btn-back');
     this.closeBtn = document.getElementById('btn-multiplayer-close');
 
+    this._initName();
     this._initMenu();
     this._initBrowser();
     this._initCreate();
@@ -91,6 +104,25 @@ export class MultiplayerUI {
     if (!this.errorEl) return;
     this.errorEl.style.display = 'none';
     this.errorEl.textContent = '';
+  }
+
+  // --- callsign --------------------------------------------------------------
+
+  _initName() {
+    this.nameInput = document.getElementById('mp-name-input');
+    if (!this.nameInput) return;
+    this.nameInput.value = getStoredPlayerName();
+    const persist = () => {
+      const value = this.nameInput.value.trim().slice(0, 24);
+      try {
+        localStorage.setItem(PLAYER_NAME_STORAGE_KEY, value || 'PLAYER');
+      } catch (err) {
+        // Storage unavailable (private mode, quota) -- the name just won't persist
+        // across reloads; main.js still reads it fresh at match-start time.
+      }
+    };
+    this.nameInput.addEventListener('input', persist);
+    this.nameInput.addEventListener('blur', persist);
   }
 
   // --- main menu -------------------------------------------------------------
@@ -179,7 +211,7 @@ export class MultiplayerUI {
       card.innerHTML = `
         <div class="mp-lobby-card-info">
           <div class="mp-lobby-host">${escapeHtml(lobby.host_display_name || 'HOST')}</div>
-          <div class="mp-lobby-meta">${lobby.player_count}/${lobby.max_players} &middot; ${escapeHtml(lobby.region)} &middot; ${escapeHtml(lobby.difficulty || 'NORMAL')}</div>
+          <div class="mp-lobby-meta">${escapeHtml(lobby.game_mode === 'STORY' ? 'STORY' : 'SURVIVAL')} &middot; ${lobby.player_count}/${lobby.max_players} &middot; ${escapeHtml(lobby.region)} &middot; ${escapeHtml(lobby.difficulty || 'NORMAL')}</div>
         </div>
         <button class="deck-btn mp-lobby-join-btn">JOIN</button>
       `;
@@ -206,6 +238,7 @@ export class MultiplayerUI {
     this.createVisibility = document.getElementById('mp-create-visibility');
     this.createRegion = document.getElementById('mp-create-region');
     this.createDifficulty = document.getElementById('mp-create-difficulty');
+    this.createMode = document.getElementById('mp-create-mode');
 
     if (submitBtn) {
       submitBtn.addEventListener('click', async () => {
@@ -215,6 +248,7 @@ export class MultiplayerUI {
             visibility: this.createVisibility ? this.createVisibility.value : 'PUBLIC',
             region: this.createRegion ? this.createRegion.value : 'AUTO',
             difficulty: this.createDifficulty ? this.createDifficulty.value : 'NORMAL',
+            gameMode: this.createMode ? this.createMode.value : 'SURVIVAL',
           });
           this.showView('lobby');
         } catch (err) {
@@ -264,6 +298,7 @@ export class MultiplayerUI {
   _initLobby() {
     this.codeRow = document.getElementById('mp-lobby-code-row');
     this.codeLabel = document.getElementById('mp-lobby-code');
+    this.modeLabel = document.getElementById('mp-lobby-mode');
     this.slotsEl = document.getElementById('mp-slots');
     this.readyBtn = document.getElementById('mp-btn-ready');
     this.startBtn = document.getElementById('mp-btn-start');
@@ -337,6 +372,7 @@ export class MultiplayerUI {
 
     if (this.codeRow) this.codeRow.style.display = lobby.visibility === 'PRIVATE' ? '' : 'none';
     if (this.codeLabel) this.codeLabel.textContent = lobby.join_code || '';
+    if (this.modeLabel) this.modeLabel.textContent = lobby.game_mode === 'STORY' ? 'CO-OP STORY MODE' : 'ENDLESS SURVIVAL';
 
     if (this.slotsEl) {
       this.slotsEl.innerHTML = '';

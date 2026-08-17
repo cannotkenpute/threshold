@@ -11,7 +11,9 @@
 import { callApi } from './apiClient.js';
 import { LobbyManager } from './LobbyManager.js';
 import { MatchManager } from './MatchManager.js';
-import { ensureAnonymousSession } from './supabaseClient.js';
+import { ensureAnonymousSession, pingServer } from './supabaseClient.js';
+
+const PING_INTERVAL_MS = 4000;
 
 export const CONNECTION_STATES = {
   OFFLINE: 'OFFLINE',
@@ -41,6 +43,30 @@ export class MultiplayerManager {
     this._changeHandlers = new Set();
     this._unsubLobby = null;
     this._unsubStatus = null;
+    this.pingMs = null;
+    this._pingTimer = null;
+  }
+
+  /** Round-trip time (ms) to the Supabase project edge, refreshed every PING_INTERVAL_MS. */
+  startPingMonitor() {
+    if (this._pingTimer) return this;
+    const tick = async () => {
+      const { ok, ms } = await pingServer();
+      this.pingMs = ok ? ms : null;
+      this._notify();
+    };
+    tick();
+    this._pingTimer = setInterval(tick, PING_INTERVAL_MS);
+    return this;
+  }
+
+  stopPingMonitor() {
+    if (this._pingTimer) {
+      clearInterval(this._pingTimer);
+      this._pingTimer = null;
+    }
+    this.pingMs = null;
+    return this;
   }
 
   onChange(handler) {
@@ -80,10 +106,10 @@ export class MultiplayerManager {
     return callApi(`/lobbies${qs ? `?${qs}` : ''}`);
   }
 
-  async createLobby({ visibility, region, difficulty, maxPlayers } = {}) {
+  async createLobby({ visibility, region, difficulty, maxPlayers, gameMode } = {}) {
     const result = await callApi('/lobbies/create', {
       method: 'POST',
-      body: { visibility, region, difficulty, maxPlayers },
+      body: { visibility, region, difficulty, maxPlayers, gameMode },
     });
     await this._enterLobby(result.lobby_id);
     return result;

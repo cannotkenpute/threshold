@@ -139,6 +139,12 @@ export class MultiplayerPlayerSync {
     const p = player.position;
     const yaw = Number(player.rotation ? player.rotation.y : 0);
     const payload = {
+      // RealtimeTransport's match-channel broadcast delivers handlers the bare payload
+      // (no senderId/meta envelope -- see RealtimeTransport.js's `broadcast`/`_emit`), so
+      // the sender's id has to travel inside the payload itself, same convention as
+      // MultiplayerFearSync's { playerId, fear }. _unwrap()'s meta-less fallback already
+      // reads payload.senderId, so this alone is what makes _isSelf() work correctly.
+      senderId: this.selfId,
       x: Math.round(p.x * 1000) / 1000,
       y: Math.round(p.y * 1000) / 1000,
       z: Math.round(p.z * 1000) / 1000,
@@ -172,7 +178,7 @@ export class MultiplayerPlayerSync {
    */
   broadcastFlashlight(isOn) {
     if (this._disposed || !this.transport || typeof this.transport.broadcast !== 'function') return this;
-    this.transport.broadcast('player:flashlight', { on: Boolean(isOn) });
+    this.transport.broadcast('player:flashlight', { senderId: this.selfId, on: Boolean(isOn) });
     return this;
   }
 
@@ -445,6 +451,17 @@ export class MultiplayerPlayerSync {
   /** Ids of the remotes currently tracked (for HUD/debug). */
   getRemoteIds() {
     return [...this._remotes.keys()];
+  }
+
+  /** { id, name, connected }[] for every tracked remote, for a HUD player list. `connected`
+   *  is false once a remote's samples have gone stale past REMOTE_TIMEOUT_MS (see update()). */
+  getRemotePlayers() {
+    const now = this._now();
+    return [...this._remotes.values()].map((r) => ({
+      id: r.id,
+      name: r.lastName || 'PLAYER',
+      connected: now - r.lastSampleAt <= REMOTE_TIMEOUT_MS,
+    }));
   }
 
   getRemoteCount() {

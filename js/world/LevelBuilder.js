@@ -547,10 +547,18 @@ export class LevelBuilder {
     };
   }
 
-  // Master build entry point for Level 1
-  buildFullLevel() {
+  // Master build entry point for Level 1. `forcedSeed` lets multiplayer Survival matches
+  // pass the host-issued match seed so every client's hashF()-driven maze (see below) comes
+  // out identical -- without it each client would independently roll its own Math.random()
+  // layout and players would be standing in physically different mazes despite sharing one
+  // match session. Reduced into the same ~[0, 10000) range buildFullLevel has always used;
+  // hashF's `* 0.6180339887` golden-ratio hash relies on levelSeed being that small, not the
+  // full-precision 53-bit match seed.
+  buildFullLevel(forcedSeed = null) {
     this.currentLevel = 1;
-    this.levelSeed = Math.random() * 10000; // new maze layout every run; landmarks are unaffected
+    this.levelSeed = forcedSeed !== null && forcedSeed !== undefined
+      ? Number(forcedSeed) % 10000
+      : Math.random() * 10000; // new maze layout every run; landmarks are unaffected
     this.regionCache.clear();
     this.clearAllWorld();
     this.update(new THREE.Vector3(0, 1.65, 20), true);

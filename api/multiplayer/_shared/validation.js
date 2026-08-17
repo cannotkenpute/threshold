@@ -9,6 +9,7 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]
 export const VISIBILITY_VALUES = Object.freeze(['PUBLIC', 'PRIVATE']);
 export const REGION_VALUES = Object.freeze(['AUTO', 'US_EAST', 'US_WEST', 'EUROPE', 'ASIA', 'OCEANIA', 'SOUTH_AMERICA']);
 export const DIFFICULTY_VALUES = Object.freeze(['NORMAL', 'HARD']);
+export const GAME_MODE_VALUES = Object.freeze(['SURVIVAL', 'STORY']);
 
 const MAX_PAGE_LIMIT = 50;
 const DEFAULT_PAGE_LIMIT = 25;
@@ -46,6 +47,12 @@ export function validateMaxPlayers(v) {
   return n;
 }
 
+export function validateGameMode(v) {
+  if (v == null) return 'SURVIVAL';
+  if (!GAME_MODE_VALUES.includes(v)) throw new ValidationError('gameMode must be SURVIVAL or STORY');
+  return v;
+}
+
 export function validateCreateLobbyBody(body) {
   body = body || {};
   return {
@@ -53,6 +60,7 @@ export function validateCreateLobbyBody(body) {
     region: validateRegion(body.region),
     difficulty: validateDifficulty(body.difficulty),
     maxPlayers: validateMaxPlayers(body.maxPlayers),
+    gameMode: validateGameMode(body.gameMode),
   };
 }
 

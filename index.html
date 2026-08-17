@@ -53,25 +53,37 @@
       <span id="grid-timer-text" class="grid-timer">06:00</span>
     </div>
 
-    <!-- Top Right Cluster: FPS Counter & Mechanical Compass -->
+    <!-- Top Right Cluster: FPS Counter, Mechanical Compass & Multiplayer Status -->
     <div class="top-right-hud">
-      <div id="fps-counter-widget" class="fps-counter-widget fps-good">
-        <span class="fps-label">FPS</span>
-        <span id="fps-value-text" class="fps-value">60</span>
-        <span class="fps-label" style="margin-left: 8px;">DRAW</span>
-        <span id="draw-calls-text" class="fps-value">0</span>
-        <span class="fps-label" style="margin-left: 8px;">TRI</span>
-        <span id="tri-count-text" class="fps-value">0</span>
-      </div>
-      <div class="compass-widget">
-        <div class="compass-dial">
-          <div id="compass-needle" class="compass-needle"></div>
-          <div class="compass-center-pin"></div>
-          <div class="compass-cardinal n">N</div>
-          <div class="compass-cardinal s">S</div>
-          <div class="compass-cardinal e">E</div>
-          <div class="compass-cardinal w">W</div>
+      <div class="top-right-hud-row">
+        <div id="fps-counter-widget" class="fps-counter-widget fps-good">
+          <span class="fps-label">FPS</span>
+          <span id="fps-value-text" class="fps-value">60</span>
+          <span class="fps-label" style="margin-left: 8px;">DRAW</span>
+          <span id="draw-calls-text" class="fps-value">0</span>
+          <span class="fps-label" style="margin-left: 8px;">TRI</span>
+          <span id="tri-count-text" class="fps-value">0</span>
         </div>
+        <div class="compass-widget">
+          <div class="compass-dial">
+            <div id="compass-needle" class="compass-needle"></div>
+            <div class="compass-center-pin"></div>
+            <div class="compass-cardinal n">N</div>
+            <div class="compass-cardinal s">S</div>
+            <div class="compass-cardinal e">E</div>
+            <div class="compass-cardinal w">W</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Multiplayer-only: server ping + connected player roster -->
+      <div id="mp-status-hud" class="mp-status-hud" style="display:none;">
+        <div class="mp-ping-row">
+          <span class="fps-label">PING</span>
+          <span id="mp-ping-value" class="fps-value">--</span>
+          <span class="fps-label" style="margin-left: 2px;">ms</span>
+        </div>
+        <div id="mp-player-roster" class="mp-player-roster"></div>
       </div>
     </div>
 
@@ -457,6 +469,11 @@
 
       <div id="mp-error" class="mp-error" style="display:none;"></div>
 
+      <div class="mp-name-row">
+        <label class="option-label" for="mp-name-input">CALLSIGN</label>
+        <input id="mp-name-input" class="mp-select" type="text" maxlength="24" placeholder="PLAYER">
+      </div>
+
       <!-- Main menu -->
       <div class="mp-view active" data-view="menu">
         <div class="mp-menu-options">
@@ -490,6 +507,13 @@
 
       <!-- Create lobby -->
       <div class="mp-view" data-view="create">
+        <div class="option-group">
+          <label class="option-label">GAME MODE</label>
+          <select id="mp-create-mode" class="mp-select">
+            <option value="SURVIVAL">ENDLESS SURVIVAL</option>
+            <option value="STORY">CO-OP STORY MODE</option>
+          </select>
+        </div>
         <div class="option-group">
           <label class="option-label">VISIBILITY</label>
           <select id="mp-create-visibility" class="mp-select">
@@ -530,6 +554,10 @@
 
       <!-- Lobby screen -->
       <div class="mp-view" data-view="lobby">
+        <div class="mp-lobby-mode-row">
+          <span>MODE</span>
+          <span id="mp-lobby-mode" class="mp-lobby-mode"></span>
+        </div>
         <div id="mp-lobby-code-row" class="mp-lobby-code-row">
           <span>CODE</span>
           <span id="mp-lobby-code" class="mp-lobby-code"></span>

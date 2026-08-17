@@ -105,3 +105,25 @@ export async function checkConnection() {
     return { ok: false, status: 0, error: String(err && err.message || err) };
   }
 }
+
+/**
+ * Round-trip time (ms) to the Supabase project's edge (the same host the Realtime
+ * websocket and every /rest, /auth call go through) -- what the HUD shows as "server
+ * ping". Uses the lightweight /auth/v1/health endpoint purely as a timing probe.
+ */
+export async function pingServer() {
+  try {
+    const raw = await getPublicConfig();
+    const cfg = normalizeConfig(raw);
+    if (!cfg.enabled || !cfg.url || !cfg.anonKey) return { ok: false, ms: null };
+    const start = performance.now();
+    const res = await fetch(`${cfg.url}/auth/v1/health`, {
+      headers: { apikey: cfg.anonKey },
+      cache: 'no-store',
+    });
+    const ms = Math.round(performance.now() - start);
+    return { ok: res.ok, ms };
+  } catch (err) {
+    return { ok: false, ms: null };
+  }
+}
